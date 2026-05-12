@@ -42,3 +42,14 @@ bin/
 ### Mac OS ###
 .DS_Store
 /.idea/
+
+### Docker ###
+docker-compose.env
+
+### Frontend ###
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+### LocalStack ###
+.localstack/

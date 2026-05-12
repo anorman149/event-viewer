@@ -8,11 +8,11 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** A running, deployable shell with no business logic yet.
 
-- [ ] Multi-module Gradle project structure — `apps/gateway`, `apps/bff`, `apps/event-ingest`, `apps/event-read`, `apps/management`; `libs/event-api`, `libs/opensearch-lib`, `libs/s3-lib`, `libs/common`; `frontend/` as a sibling Vite project
-- [ ] Spring Boot application stub with health-check endpoint (`GET /actuator/health`)
-- [ ] React + TypeScript frontend scaffold (Vite, routing, placeholder home page)
-- [ ] Docker Compose for local dev (Kafka KRaft, PostgreSQL, OpenSearch, OpenSearch Dashboards, LocalStack S3)
-- [ ] GitHub Actions CI — build, lint, and unit-test on every push
+- [x] Multi-module Gradle project structure — `apps/gateway`, `apps/bff`, `apps/event-ingest`, `apps/event-read`, `apps/management`; `libs/event-api`, `libs/opensearch-lib`, `libs/s3-lib`, `libs/common`; `frontend/` as a sibling Vite project
+- [x] Spring Boot application stub with health-check endpoint (`GET /actuator/health`)
+- [x] React + TypeScript frontend scaffold (Vite, routing, placeholder home page)
+- [x] Docker Compose for local dev (Kafka KRaft, PostgreSQL, OpenSearch, OpenSearch Dashboards, LocalStack S3)
+- [x] GitHub Actions CI — build, lint, and unit-test on every push
 
 ---
 
