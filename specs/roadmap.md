@@ -21,7 +21,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 **Goal:** Events flow from producer through Kafka into all three stores correctly.
 
 - [ ] Kafka topic provisioning and local producer test harness
-- [ ] REST ingest endpoint (`POST /api/v1/events`) with schema-less JSON body
+- [ ] REST ingest endpoint (`POST /event/v1/events`) with schema-less JSON body
 - [ ] Kafka consumer → S3 batch writer: accumulate 5,000 events, flush as ZSTD-compressed file with Hive-style key (`year=/month=/day=/hour=/schema_type=/pod=/<uuid>.zst`)
 - [ ] Kafka consumer → OpenSearch metadata index: one document per event with `s3_key`, `batch_offset`, `batch_length`, indexed metadata fields
 - [ ] Kafka consumer → PostgreSQL: write ingest audit record (batch key, event count, flush timestamp) — no raw event data
@@ -47,8 +47,8 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 **Goal:** Events are queryable with full boolean search; raw payloads are retrievable via S3 lookup.
 
 - [ ] OpenSearch query service — full boolean search (AND / NOT / OR), keyword, time-range, and schema-type filters
-- [ ] REST search endpoint (`GET /api/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
-- [ ] Raw payload retrieval: OpenSearch lookup → `s3_key` + byte range → fetch from S3 → ZSTD decompress → return event (`GET /api/v1/events/{id}/payload`)
+- [ ] REST search endpoint (`GET /search/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
+- [ ] Raw payload retrieval: OpenSearch lookup → `s3_key` + byte range → fetch from S3 → ZSTD decompress → return event (`GET /search/v1/events/{id}/payload`)
 - [ ] Pagination and cursor-based result streaming for large result sets
 - [ ] OpenAPI spec published and used to generate typed TypeScript client
 
