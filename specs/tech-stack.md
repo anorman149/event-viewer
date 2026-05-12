@@ -38,6 +38,10 @@ Full architecture detail, traffic flow, and `settings.gradle` declarations: see 
 | Build | Gradle (Groovy DSL) | Multi-module support, incremental builds; Groovy DSL is fully supported and preferred here over Kotlin DSL |
 | API style | REST + WebSocket (STOMP) | REST for query/admin; WebSocket for live event feeds |
 | API contract | OpenAPI 3.1 (Springdoc) | Contract-first; generates typed clients for the frontend |
+| Fault tolerance | Resilience4J | Circuit breakers per downstream route + adaptive rate limiting per client in `apps/gateway`; no separate cluster required |
+| Auth (internal) | Spring OAuth2 Resource Server | Every internal service independently validates the forwarded JWT using the platform RSA public key |
+| Async / threads | Virtual threads (Project Loom, Java 25) | `spring.threads.virtual.enabled: true`; all `@Async` and `@Scheduled` executors use virtual thread pools |
+| Context propagation | Micrometer `ContextSnapshot` + `DelegatingSecurityContextExecutor` | Propagates Micrometer spans, Spring Security principal, and MDC (correlation ID) into every spawned thread |
 
 > **Gradle DSL note:** Gradle 8.x made Kotlin DSL the new default for `gradle init`, offering better IDE autocomplete and type safety. Groovy DSL remains fully supported and is not deprecated. This project stays on Groovy DSL.
 
@@ -147,6 +151,18 @@ Per-event documents in OpenSearch include `s3_key`, `batch_offset`, and `batch_l
 | WebSocket | STOMP.js | Pairs with Spring's STOMP broker for live feeds |
 | UI components | shadcn/ui (Tailwind CSS) | Accessible, unstyled primitives; full control over design |
 
+## Jackson Configuration Standard
+
+All Spring Boot apps apply the same Jackson settings via `application.yml`. These are non-negotiable defaults:
+
+| Property | Value | Rationale |
+|---|---|---|
+| `serialization.write-dates-as-timestamps` | `false` | All `Instant` / `LocalDate` fields serialize as ISO-8601 strings — readable and unambiguous |
+| `deserialization.fail-on-unknown-properties` | `false` | Services can receive responses with fields added in newer versions without breaking |
+| `default-property-inclusion` | `non_null` | Null fields are omitted from responses — cleaner payloads, no ambiguity between absent and null |
+
+---
+
 ## Infrastructure & Operations
 
 | Concern | Technology |
@@ -163,8 +179,11 @@ Per-event documents in OpenSearch include `s3_key`, `batch_offset`, and `batch_l
 
 | Concern | Approach |
 |---|---|
-| Authentication | Spring Security + JWT (access + refresh tokens) |
-| Authorization | Role-Based Access Control (RBAC) |
-| API ingest auth | API keys (hashed, scoped per client) |
-| Transport | TLS everywhere (enforced in production) |
-| Audit logging | Immutable audit trail in PostgreSQL |
+| External authentication | `apps/gateway`: Spring Security JWT validation filter; validates signature + expiry; rejects 401 before downstream; forwards `Authorization` header unchanged |
+| Internal authentication | All `apps/*` services: Spring OAuth2 Resource Server; each independently validates the JWT using the platform RSA public key — no service trusts the gateway implicitly |
+| Authorization | Role-Based Access Control (RBAC) — roles enforced at the application layer (Phase 11) |
+| API ingest auth | API keys (hashed, scoped per client); gateway validates key and exchanges for a short-lived JWT before forwarding (Phase 11) |
+| Transport | TLS termination at gateway; plain HTTP inside the cluster; Istio mTLS between sidecars in production |
+| Network isolation | K8s `NetworkPolicy` restricts pod-to-pod reachability; Istio mTLS provides mutual certificate authentication as a second layer |
+| Audit logging | Immutable audit trail in PostgreSQL (Phase 11) |
+| Dev key pair | RSA-2048 key pair committed (public key only) for local dev JWT generation; replaced by real OIDC provider in Phase 11 |
