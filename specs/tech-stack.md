@@ -6,6 +6,26 @@
 - **Open-source first** — avoid proprietary lock-in at the data layer
 - **Java-native backend** — all server-side services stay in the JVM ecosystem
 - **Spec-driven** — APIs are contract-first (OpenAPI); schema types are versioned
+- **Monorepo, multi-service** — independently deployable apps sharing versioned libraries; see `specs/architecture.md`
+
+---
+
+## Application Architecture (Summary)
+
+| Component | Type | Role |
+|---|---|---|
+| `apps/gateway` | Spring Boot app (Spring Cloud Gateway) | External entry point — JWT auth, rate limiting, routes `/event/v1/**`, `/search/v1/**`, `/api/v1/**`, `/bff/v1/**` |
+| `apps/bff` | Spring Boot app (WebFlux) | Backend for Frontend — UI aggregation, response shaping, browser session/CSRF |
+| `apps/event-ingest` | Spring Boot app | Kafka consumer + S3 batch writer + OpenSearch indexer (write path) |
+| `apps/event-read` | Spring Boot app | OpenSearch boolean search + S3 byte-range payload retrieval (read path) |
+| `apps/management` | Spring Boot app (Spring Data JPA) | CRUD for schemas, dashboard layouts, alert rules, users/RBAC — owns PostgreSQL |
+| `libs/event-api` | Gradle library | Shared domain models, DTOs, OpenAPI spec |
+| `libs/opensearch-lib` | Gradle library | OpenSearch client abstraction, query builders, bulk indexing |
+| `libs/s3-lib` | Gradle library | AWS S3 / LocalStack abstraction, ZSTD batch writer/reader, Hive key builder |
+| `libs/common` | Gradle library | Logging config, correlation ID filter, shared exceptions |
+| `frontend/` | Vite/Node (not Gradle) | React + TypeScript UI — talks to BFF exclusively |
+
+Full architecture detail, traffic flow, and `settings.gradle` declarations: see `specs/architecture.md`.
 
 ---
 
@@ -25,7 +45,7 @@
 
 | Component | Technology | Rationale |
 |---|---|---|
-| Message bus | Apache Kafka | Industry standard for high-throughput, durable event streaming |
+| Message bus | Apache Kafka 3.8 (KRaft mode) | Industry standard for high-throughput, durable event streaming; KRaft eliminates the Zookeeper dependency |
 | Schema registry | Confluent Schema Registry (self-hosted) | Avro schema versioning and compatibility enforcement |
 | Stream processing | Kafka Streams | Lightweight, embedded; no separate cluster needed for early phases |
 
@@ -62,6 +82,8 @@ When a user needs the **full raw payload**, the API resolves it as: OpenSearch l
 ### S3 — Raw Event Storage
 
 Owns the immutable, compressed source of truth for every event payload. Never queried directly; always accessed via the OpenSearch lookup.
+
+**Local dev:** AWS S3 is emulated by **LocalStack** (`localstack/localstack:3`, port 4566). Application code targets `http://localhost:4566` with a dummy AWS credential pair; no AWS account is needed. Production points to real AWS S3.
 
 **Batching:** Events are accumulated and flushed in batches of **5,000 events** per file. This amortizes S3 PUT costs and produces files that compress well.
 
@@ -129,7 +151,7 @@ Per-event documents in OpenSearch include `s3_key`, `batch_offset`, and `batch_l
 
 | Concern | Technology |
 |---|---|
-| Containerization | Docker + Docker Compose (local dev) |
+| Containerization | Docker + Docker Compose (local dev) — Kafka KRaft, PostgreSQL, OpenSearch, OpenSearch Dashboards, LocalStack S3 |
 | Orchestration | Kubernetes (production target) |
 | CI/CD | GitHub Actions |
 | Metrics | Micrometer → Prometheus → Grafana |
