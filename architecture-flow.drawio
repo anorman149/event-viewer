@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Event Viewer — Architecture Traffic Flow
+  Import into Lucidchart: File > Import > From Other Sources > Diagrams.net (.drawio)
+  Or open directly at https://app.diagrams.net
+-->
+<mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1"
+              connect="1" arrows="1" fold="1" page="1" pageScale="1"
+              pageWidth="1650" pageHeight="950" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- ═══════════════════════════════════════════════
+         TITLE
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="title" value="Event Viewer — Architecture &amp; Traffic Flow"
+            style="text;html=1;strokeColor=none;fillColor=none;align=center;
+                   verticalAlign=middle;fontSize=18;fontStyle=1;fontColor=#1a1a2e;"
+            vertex="1" parent="1">
+      <mxGeometry x="400" y="10" width="700" height="35" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         LAYER BACKGROUND BANDS
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="bg-client" value=""
+            style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8f4fd;strokeColor=#aed6f1;opacity=60;"
+            vertex="1" parent="1">
+      <mxGeometry x="20" y="55" width="1590" height="120" as="geometry" />
+    </mxCell>
+    <mxCell id="bg-gateway" value=""
+            style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fef9e7;strokeColor=#f9e79f;opacity=60;"
+            vertex="1" parent="1">
+      <mxGeometry x="20" y="225" width="1590" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="bg-app" value=""
+            style="rounded=0;whiteSpace=wrap;html=1;fillColor=#eafaf1;strokeColor=#a9dfbf;opacity=60;"
+            vertex="1" parent="1">
+      <mxGeometry x="20" y="385" width="1590" height="135" as="geometry" />
+    </mxCell>
+    <mxCell id="bg-data" value=""
+            style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5eef8;strokeColor=#d2b4de;opacity=60;"
+            vertex="1" parent="1">
+      <mxGeometry x="20" y="570" width="1590" height="120" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         LAYER LABELS
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="lbl-client" value="CLIENT LAYER"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=top;fontSize=10;fontStyle=1;fontColor=#2e86c1;"
+            vertex="1" parent="1">
+      <mxGeometry x="30" y="60" width="120" height="18" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-gateway" value="GATEWAY LAYER"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=top;fontSize=10;fontStyle=1;fontColor=#b7950b;"
+            vertex="1" parent="1">
+      <mxGeometry x="30" y="230" width="120" height="18" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-app" value="APPLICATION LAYER"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=top;fontSize=10;fontStyle=1;fontColor=#1e8449;"
+            vertex="1" parent="1">
+      <mxGeometry x="30" y="390" width="140" height="18" as="geometry" />
+    </mxCell>
+    <mxCell id="lbl-data" value="DATA LAYER"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=top;fontSize=10;fontStyle=1;fontColor=#6c3483;"
+            vertex="1" parent="1">
+      <mxGeometry x="30" y="575" width="120" height="18" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         CLIENT NODES
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="browser" value="&lt;b&gt;Browser&lt;/b&gt;&lt;br&gt;React UI (Vite + TypeScript)&lt;br&gt;&lt;i&gt;Talks to BFF exclusively&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6eaf8;strokeColor=#2e86c1;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="100" y="70" width="230" height="80" as="geometry" />
+    </mxCell>
+
+    <mxCell id="apiclients" value="&lt;b&gt;API Clients&lt;/b&gt;&lt;br&gt;CLI · Integrations · Machine-to-Machine&lt;br&gt;&lt;i&gt;Auth via API key or JWT&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d6eaf8;strokeColor=#2e86c1;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="1130" y="70" width="280" height="80" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         API GATEWAY
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="gateway"
+            value="&lt;b&gt;API Gateway&lt;/b&gt; — apps/gateway&lt;br&gt;Spring Cloud Gateway (Reactive)&lt;br&gt;JWT auth · Rate limiting · Correlation ID injection · TLS termination&lt;br&gt;Routes: &lt;b&gt;/bff/v1/**&lt;/b&gt; · &lt;b&gt;/event/v1/**&lt;/b&gt; · &lt;b&gt;/search/v1/**&lt;/b&gt; · &lt;b&gt;/api/v1/**&lt;/b&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fdebd0;strokeColor=#d68910;
+                   fontSize=11;arcSize=8;"
+            vertex="1" parent="1">
+      <mxGeometry x="490" y="235" width="580" height="85" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         APPLICATION NODES
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="bff"
+            value="&lt;b&gt;BFF&lt;/b&gt; — apps/bff&lt;br&gt;Spring Boot (WebFlux)&lt;br&gt;UI response aggregation&lt;br&gt;Response shaping for components&lt;br&gt;Browser session / CSRF"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8daef;strokeColor=#7d3c98;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="55" y="395" width="200" height="110" as="geometry" />
+    </mxCell>
+
+    <mxCell id="eventingest"
+            value="&lt;b&gt;event-ingest&lt;/b&gt; — apps/event-ingest&lt;br&gt;Spring Boot + Spring Kafka&lt;br&gt;Kafka Producer → event-raw topic&lt;br&gt;Kafka Consumer → batch accumulator&lt;br&gt;S3 ZSTD writer + OpenSearch indexer&lt;br&gt;&lt;i&gt;1M events/sec in · ~200 RPS out&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5f5e3;strokeColor=#1e8449;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="310" y="390" width="240" height="130" as="geometry" />
+    </mxCell>
+
+    <mxCell id="eventread"
+            value="&lt;b&gt;event-read&lt;/b&gt; — apps/event-read&lt;br&gt;Spring Boot + AWS SDK v2&lt;br&gt;OpenSearch boolean query&lt;br&gt;(AND / NOT / OR · time-range)&lt;br&gt;S3 byte-range payload fetch&lt;br&gt;&lt;i&gt;1,000–10,000 RPS&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5f5e3;strokeColor=#1e8449;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="620" y="390" width="230" height="130" as="geometry" />
+    </mxCell>
+
+    <mxCell id="management"
+            value="&lt;b&gt;management&lt;/b&gt; — apps/management&lt;br&gt;Spring Boot + Spring Data JPA&lt;br&gt;Schemas · Dashboard layouts&lt;br&gt;Alert rules · Users / RBAC&lt;br&gt;API keys · Audit log&lt;br&gt;&lt;i&gt;Sole writer to PostgreSQL&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5f5e3;strokeColor=#1e8449;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="930" y="390" width="240" height="130" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         DATA NODES
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="kafka"
+            value="&lt;b&gt;Kafka&lt;/b&gt; (KRaft — no Zookeeper)&lt;br&gt;topic: event-raw&lt;br&gt;topic: event-dlq (dead letter)"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2f3f4;strokeColor=#555555;
+                   fontColor=#1a1a1a;fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="310" y="585" width="210" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="s3"
+            value="&lt;b&gt;S3&lt;/b&gt; (AWS / LocalStack)&lt;br&gt;ZSTD-compressed batches (5k events/file)&lt;br&gt;Hive-partitioned key paths&lt;br&gt;year=/month=/day=/hour=/schema_type=/pod="
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fef9e7;strokeColor=#d68910;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="560" y="585" width="270" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="opensearch"
+            value="&lt;b&gt;OpenSearch&lt;/b&gt;&lt;br&gt;Event metadata + s3_key&lt;br&gt;batch_offset + batch_length per event&lt;br&gt;Boolean · time-range · aggregations"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f2f3f4;strokeColor=#555555;
+                   fontColor=#1a1a1a;fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="870" y="585" width="240" height="85" as="geometry" />
+    </mxCell>
+
+    <mxCell id="postgres"
+            value="&lt;b&gt;PostgreSQL&lt;/b&gt;&lt;br&gt;Schemas · Dashboards · Alert rules&lt;br&gt;Users · API keys (hashed) · Audit log&lt;br&gt;&lt;i&gt;Entity &amp;amp; concept management only&lt;/i&gt;"
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fadbd8;strokeColor=#c0392b;
+                   fontSize=11;arcSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="1150" y="585" width="250" height="85" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — Clients → Gateway
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-browser-gw"
+            value="HTTPS · /bff/v1/**"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2e86c1;strokeWidth=2;
+                   fontSize=10;fontColor=#1a5276;labelBackgroundColor=#eaf2ff;
+                   endArrow=block;endFill=1;"
+            edge="1" source="browser" target="gateway" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-api-gw"
+            value="HTTPS · /event/v1/** · /search/v1/** · /api/v1/**"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2e86c1;strokeWidth=2;
+                   fontSize=10;fontColor=#1a5276;labelBackgroundColor=#eaf2ff;
+                   endArrow=block;endFill=1;"
+            edge="1" source="apiclients" target="gateway" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — Gateway → Applications
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-gw-bff"
+            value="HTTP · /bff/v1/**"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#7d3c98;strokeWidth=2;
+                   fontSize=10;fontColor=#6c3483;labelBackgroundColor=#f5eef8;
+                   endArrow=block;endFill=1;"
+            edge="1" source="gateway" target="bff" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-gw-ingest"
+            value="POST /event/v1/events&lt;br&gt;(JWT verified · 1M events/sec)"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="gateway" target="eventingest" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-gw-read"
+            value="GET /search/v1/events?q=...&amp;type=...&amp;from=...&amp;to=...&lt;br&gt;GET /search/v1/events/{id}/payload&lt;br&gt;(JWT verified)"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="gateway" target="eventread" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-gw-mgmt"
+            value="GET / POST / PUT / DELETE&lt;br&gt;/api/v1/schemas · /api/v1/dashboards&lt;br&gt;/api/v1/alerts · /api/v1/users&lt;br&gt;(JWT verified)"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="gateway" target="management" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — BFF → Internal Services (dashed = internal, no gateway)
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-bff-read"
+            value="GET (internal · no gateway hop)&lt;br&gt;event search + payload fetch"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#7d3c98;strokeWidth=1;
+                   dashed=1;fontSize=10;fontColor=#6c3483;labelBackgroundColor=#f5eef8;
+                   endArrow=block;endFill=1;"
+            edge="1" source="bff" target="eventread" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-bff-mgmt"
+            value="GET / POST (internal · no gateway hop)&lt;br&gt;schemas · dashboards · alerts · users"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#7d3c98;strokeWidth=1;
+                   dashed=1;fontSize=10;fontColor=#6c3483;labelBackgroundColor=#f5eef8;
+                   endArrow=block;endFill=1;"
+            edge="1" source="bff" target="management" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — event-ingest → Data
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-ingest-kafka-produce"
+            value="produce → event-raw topic"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="eventingest" target="kafka" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-kafka-consume"
+            value="consume (same app)&lt;br&gt;→ batch accumulator"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=1;
+                   dashed=1;fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;
+                   exitX=0;exitY=0.5;exitDx=0;exitDy=0;
+                   entryX=0;entryY=1;entryDx=0;entryDy=0;"
+            edge="1" source="kafka" target="eventingest" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="260" y="627" />
+          <mxPoint x="260" y="520" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+
+    <mxCell id="e-ingest-s3"
+            value="PUT batch (ZSTD · 5k events/file)&lt;br&gt;~200 RPS · Hive key path"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="eventingest" target="s3" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-ingest-os"
+            value="bulk index metadata&lt;br&gt;s3_key + batch_offset + batch_length&lt;br&gt;~200 RPS"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="eventingest" target="opensearch" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — event-read → Data
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-read-os"
+            value="① OpenSearch query&lt;br&gt;boolean (AND/NOT/OR) · time-range&lt;br&gt;→ returns s3_key + batch_offset"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="eventread" target="opensearch" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e-read-s3"
+            value="② S3 byte-range GET&lt;br&gt;(payload fetch via OS lookup)"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#1e8449;strokeWidth=2;
+                   fontSize=10;fontColor=#1e8449;labelBackgroundColor=#eafaf1;
+                   endArrow=block;endFill=1;"
+            edge="1" source="eventread" target="s3" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         EDGES — management → PostgreSQL
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="e-mgmt-pg"
+            value="CRUD via Spring Data JPA&lt;br&gt;schemas · dashboards · alerts · users"
+            style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#c0392b;strokeWidth=2;
+                   fontSize=10;fontColor=#922b21;labelBackgroundColor=#fadbd8;
+                   endArrow=block;endFill=1;"
+            edge="1" source="management" target="postgres" parent="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+
+    <!-- ═══════════════════════════════════════════════
+         LEGEND
+    ═══════════════════════════════════════════════ -->
+    <mxCell id="legend-box" value=""
+            style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=11;"
+            vertex="1" parent="1">
+      <mxGeometry x="30" y="715" width="440" height="110" as="geometry" />
+    </mxCell>
+
+    <mxCell id="legend-title" value="Legend"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=top;fontSize=11;fontStyle=1;"
+            vertex="1" parent="1">
+      <mxGeometry x="45" y="720" width="80" height="20" as="geometry" />
+    </mxCell>
+
+    <mxCell id="legend-solid-line" value=""
+            style="endArrow=block;endFill=1;html=1;strokeColor=#1e8449;strokeWidth=2;"
+            edge="1" parent="1">
+      <mxGeometry x="45" y="752" width="60" height="10" as="geometry">
+        <mxPoint x="45" y="752" as="sourcePoint" />
+        <mxPoint x="105" y="752" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="legend-solid-lbl" value="Solid — routed external HTTP call (via gateway)"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=middle;fontSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="115" y="742" width="340" height="20" as="geometry" />
+    </mxCell>
+
+    <mxCell id="legend-dashed-line" value=""
+            style="endArrow=block;endFill=1;html=1;strokeColor=#7d3c98;strokeWidth=1;dashed=1;"
+            edge="1" parent="1">
+      <mxGeometry x="45" y="775" width="60" height="10" as="geometry">
+        <mxPoint x="45" y="775" as="sourcePoint" />
+        <mxPoint x="105" y="775" as="targetPoint" />
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="legend-dashed-lbl" value="Dashed — internal service call (bypasses gateway)"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=middle;fontSize=10;"
+            vertex="1" parent="1">
+      <mxGeometry x="115" y="765" width="340" height="20" as="geometry" />
+    </mxCell>
+
+    <mxCell id="legend-volume-lbl"
+            value="Write volume: 1M events/sec in → ~200 RPS to S3 + OpenSearch (5,000 events/batch)&lt;br&gt;Read volume: 1,000–10,000 RPS across event-read · bff · management"
+            style="text;html=1;strokeColor=none;fillColor=none;align=left;
+                   verticalAlign=middle;fontSize=10;fontColor=#555555;"
+            vertex="1" parent="1">
+      <mxGeometry x="45" y="795" width="410" height="25" as="geometry" />
+    </mxCell>
+
+  </root>
+</mxGraphModel>

@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: event-viewer-gateway
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always
+
+# Routes are configured in later phases once downstream services are running.
+# spring:
+#   cloud:
+#     gateway:
+#       routes:
+#         - id: bff
+#           uri: http://localhost:8081
+#           predicates:
+#             - Path=/bff/v1/**

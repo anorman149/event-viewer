@@ -1,1 +1,12 @@
 rootProject.name = 'event-viewer'
+
+include 'apps:gateway'
+include 'apps:bff'
+include 'apps:event-ingest'
+include 'apps:event-read'
+include 'apps:management'
+
+include 'libs:event-api'
+include 'libs:opensearch-lib'
+include 'libs:s3-lib'
+include 'libs:common'
