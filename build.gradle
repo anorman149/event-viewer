@@ -41,8 +41,9 @@ subprojects {
 }
 
 dockerCompose {
-    useComposeFiles = ['docker-compose.yml']
-    waitForTcpPorts = true
+    projectName = 'event-viewer-test-services'
+    useComposeFiles = ['docker-compose-test.yml']
+    waitForTcpPorts = false
 }
 
 configure(subprojects.findAll { it.path.startsWith(':apps:') }) {
