@@ -1,6 +1,90 @@
 spring:
   application:
     name: event-viewer-gateway
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: classpath:keys/platform-public.pem
+  cloud:
+    gateway:
+      routes:
+        - id: event-ingest
+          uri: ${EVENT_INGEST_URI:http://localhost:8081}
+          predicates:
+            - Path=/event/v1/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: event-ingest
+                fallbackUri: forward:/fallback/event-ingest
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@clientRateLimiter}"
+                key-resolver: "#{@jwtSubjectKeyResolver}"
+
+        - id: event-read
+          uri: ${EVENT_READ_URI:http://localhost:8082}
+          predicates:
+            - Path=/search/v1/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: event-read
+                fallbackUri: forward:/fallback/event-read
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@clientRateLimiter}"
+                key-resolver: "#{@jwtSubjectKeyResolver}"
+
+        - id: management
+          uri: ${MANAGEMENT_URI:http://localhost:8083}
+          predicates:
+            - Path=/api/v1/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: management
+                fallbackUri: forward:/fallback/management
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@clientRateLimiter}"
+                key-resolver: "#{@jwtSubjectKeyResolver}"
+
+        - id: bff
+          uri: ${BFF_URI:http://localhost:8084}
+          predicates:
+            - Path=/bff/v1/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: bff
+                fallbackUri: forward:/fallback/bff
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@clientRateLimiter}"
+                key-resolver: "#{@jwtSubjectKeyResolver}"
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+  ratelimiter:
+    configs:
+      default:
+        limitForPeriod: 100
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
 
 server:
   port: 8080
@@ -9,17 +93,17 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health, metrics, prometheus
   endpoint:
     health:
       show-details: always
-
-# Routes are configured in later phases once downstream services are running.
-# spring:
-#   cloud:
-#     gateway:
-#       routes:
-#         - id: bff
-#           uri: http://localhost:8081
-#           predicates:
-#             - Path=/bff/v1/**
+  tracing:
+    enabled: true
+    sampling:
+      probability: 1.0
+    propagation:
+      consume:
+        - w3c
+        - b3
+      produce:
+        - w3c

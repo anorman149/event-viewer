@@ -46,6 +46,10 @@ bin/
 ### Docker ###
 docker-compose.env
 
+### Dev RSA Key (never commit the private key) ###
+dev-private.pem
+platform-public.pem
+
 ### Frontend ###
 frontend/node_modules/
 frontend/dist/

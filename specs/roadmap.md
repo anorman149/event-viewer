@@ -20,12 +20,12 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** Events arrive at the REST endpoint and land durably in Kafka. Platform-wide build standards (security, serialization, threading, fault tolerance) are established here and inherited by every subsequent phase.
 
-- [ ] Kafka topic provisioning via Spring Kafka `@ConfigurationProperties` — each topic plus its DLT configured from `application.yml` with name, partitions, and replication factor; `KafkaAdmin` creates all topics on startup
-- [ ] REST ingest endpoint (`POST /event/v1/events`) with schema-less JSON body; publishes received events to `event-raw` topic
-- [ ] Jackson configuration standardized across all Spring Boot apps — `write-dates-as-timestamps: false`, `fail-on-unknown-properties: false`, `default-property-inclusion: non_null`
-- [ ] Virtual threads enabled on all Spring Boot MVC apps; `@Async` and `@Scheduled` executors configured on virtual thread pools; `ContextSnapshotTaskDecorator` in `libs/common` propagates Spring Security context, MDC, and Micrometer spans into every spawned thread
-- [ ] Spring OAuth2 Resource Server added to all internal apps (`event-ingest`, `event-read`, `management`, `bff`); each validates the JWT using a committed dev RSA public key; gateway validates and forwards `Authorization` header unchanged; dev RSA key pair generated for local use
-- [ ] Gateway Resilience4J: `CircuitBreaker` per downstream service route + adaptive `RateLimiter` per client keyed on JWT subject or API key
+- [x] Kafka topic provisioning via Spring Kafka `@ConfigurationProperties` — each topic plus its DLT configured from `application.yml` with name, partitions, and replication factor; `KafkaAdmin` creates all topics on startup
+- [x] REST ingest endpoint (`POST /event/v1/events`) with schema-less JSON body; publishes received events to `event-raw` topic
+- [x] Jackson configuration standardized across all Spring Boot apps — `write-dates-as-timestamps: false`, `fail-on-unknown-properties: false`, `default-property-inclusion: non_null`
+- [x] Virtual threads enabled on all Spring Boot MVC apps; `@Async` and `@Scheduled` executors configured on virtual thread pools; `ContextSnapshotTaskDecorator` in `libs/common` propagates Spring Security context, MDC, and Micrometer spans into every spawned thread
+- [x] Spring OAuth2 Resource Server added to all internal apps (`event-ingest`, `event-read`, `management`, `bff`); each validates the JWT using a committed dev RSA public key; gateway validates and forwards `Authorization` header unchanged; dev RSA key pair generated for local use
+- [x] Gateway Resilience4J: `CircuitBreaker` per downstream service route + adaptive `RateLimiter` per client keyed on JWT subject or API key
 
 ---
 
