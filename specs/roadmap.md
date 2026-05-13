@@ -61,16 +61,17 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ## Phase 5 — S3 Storage
 
-**Goal:** Events are flushed as ZSTD-compressed Hive-partitioned batch files to S3 with full performance tuning, per-event byte-range tracking, and production-grade security.
+**Goal:** Events are flushed as individually ZSTD-compressed records in Hive-partitioned batch files to S3 with full performance tuning, per-event byte-range tracking, and production-grade security.
 
 - [ ] `HiveKeyBuilder` in `libs/s3-lib` — constructs `events/year=YYYY/month=MM/day=DD/hour=HH/schema_type=<type>/pod=<pod>/<uuid>.zst` from partition params; pod name injected from `MY_POD_NAME` env var
-- [ ] `S3BatchBuffer` — thread-safe accumulator; triggers flush on 5,000 events OR 30-second elapsed time (whichever comes first); records per-event byte offset within uncompressed stream
-- [ ] `S3BatchWriter` — serializes buffer to ZSTD level-3 compressed bytes; records compressed/uncompressed sizes; executes S3 PUT; returns `S3BatchResult` (s3Key, List of per-event byte offsets + lengths, sizes)
-- [ ] Multi-threaded GET with byte-range — `S3RangeReader` fetches a single event's bytes using `Range: bytes=N-M`; configurable thread pool for parallel multi-chunk downloads
-- [ ] AWS S3 client config — connection pool size, request timeout, retry strategy (SDK default + Resilience4J); transfer manager for multipart upload on batches > configurable threshold
+- [ ] Per-event ZSTD compression — each event is individually compressed (ZSTD level-3) and appended to the S3 object; the file is a flat sequence of independently-compressed blobs, not a single compressed stream; per-event compressed byte offset and length are recorded at write time so a GET Range can retrieve and decompress exactly one event without reading the rest of the file
+- [ ] `S3BatchWriter` — writes one Kafka consumer batch directly to S3 with no additional buffering layer; batch size is whatever Kafka delivers (up to `max.poll.records` — if Kafka returns 20 events, 20 events are written immediately, no waiting); returns `S3BatchResult` (s3Key, List of per-event compressed byte offsets + lengths, total compressed/uncompressed sizes)
+- [ ] `S3RangeReader` — accepts `List<S3EventKey>` (each entry: s3Key, byteOffset, byteLength); spawns one virtual thread per entry to execute parallel GET Range calls; each thread decompresses its individually-compressed event blob independently; no shared thread pool — virtual threads are created per invocation and are naturally bounded by the caller's list size
+- [ ] `Event Read` REST API `loadEvents` parameter — boolean query parameter (default `false`); when `true`, pagination is hard-capped at 25 results per page and raw event payloads are fetched from S3 via `S3RangeReader` (capping to 25 bounds the maximum virtual thread count per request); when `false`, only OpenSearch metadata is returned with no S3 calls
+- [ ] AWS S3 client config — connection pool size, request timeout, retry strategy (SDK default + Resilience4J); transfer manager for multipart upload on batches above a configurable size threshold
 - [ ] Security — IAM role / instance profile in prod; LocalStack dummy credentials (`AWS_ACCESS_KEY_ID=test`) in dev; credentials never committed; S3 bucket policy enforces server-side encryption at rest
-- [ ] `DistributionSummary` for batch event count, compressed bytes, uncompressed bytes; `@Timed(histogram=true)` on `S3BatchWriter.flush()` and `S3RangeReader.fetch()`; `Counter` for flush count, S3 PUT failures
-- [ ] Unit tests (mock S3 client) + itest against LocalStack: flush 5,000 events, verify object exists, verify ZSTD decompression, verify per-event byte offsets correct
+- [ ] `DistributionSummary` for batch event count, compressed bytes, uncompressed bytes; `@Timed(histogram=true)` on `S3BatchWriter.flush()` and `S3RangeReader.fetch()`; `Counter` for flush count, S3 PUT failures, S3 GET Range calls
+- [ ] Unit tests (mock S3 client) + itest against LocalStack: flush a Kafka-batch-sized set of events (varying sizes), verify object exists, verify per-event byte offsets correct, verify each event independently decompressible by range
 
 ---
 
