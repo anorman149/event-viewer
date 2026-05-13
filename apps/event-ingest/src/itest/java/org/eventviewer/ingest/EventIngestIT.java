@@ -67,7 +67,7 @@ class EventIngestIT {
     void happyPath_returns202_andMessageLandsOnKafka() throws Exception {
         UUID eventId = UUID.randomUUID();
         IngestRequest request = new IngestRequest(
-                eventId.toString(), "order-created", null, Map.of("order_id", "ORD-1", "amount", 49.99));
+                eventId, "order-created", null, Map.of("order_id", "ORD-1", "amount", 49.99));
 
         ResponseEntity<IngestResponse> response = restTemplate.exchange(
                 url(), HttpMethod.POST,
@@ -93,7 +93,7 @@ class EventIngestIT {
 
     @Test
     void missingTimestamp_defaultsToIngestTime() throws Exception {
-        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "ping", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID(), "ping", null, null);
         Instant before = Instant.now();
 
         ResponseEntity<IngestResponse> response = restTemplate.exchange(
@@ -107,7 +107,7 @@ class EventIngestIT {
 
     @Test
     void unauthenticatedRequest_returns401() throws Exception {
-        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "test", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID(), "test", null, null);
         HttpHeaders noAuth = new HttpHeaders();
         noAuth.setContentType(MediaType.APPLICATION_JSON);
 

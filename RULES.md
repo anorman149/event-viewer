@@ -163,11 +163,15 @@ spring:
 
 `handleUnreadableMessage()` handles JSON parse failures (missing body, wrong types) with a similarly descriptive message that includes the field name and invalid value.
 
-### UUID fields must use `@ValidUUID String` — not the `UUID` type
+### UUID fields use the `UUID` type with `@NotNull`; validation errors are handled in `handleUnreadableMessage`
 
-Incoming UUID fields on request records must be declared as `String` with `@NotNull @ValidUUID`. The `@ValidUUID` constraint and `UuidValidator` live in `libs/event-api`. The service layer parses the validated string to `UUID` via `UUID.fromString()`.
+Declare incoming UUID fields as `UUID` with `@NotNull`. When a caller sends an invalid UUID string, Jackson throws `HttpMessageNotReadableException` wrapping an `InvalidFormatException` — this bypasses Bean Validation. `GlobalExceptionHandler.handleUnreadableMessage()` detects this case via `InvalidFormatException.getTargetType() == UUID.class`, extracts the field name from `getPath()`, resolves the `@JsonProperty` name via reflection, and returns:
 
-**Why:** When a field is typed `UUID`, Jackson throws `HttpMessageNotReadableException` on bad input — bypassing Bean Validation entirely and returning a cryptic error. With `String` + `@ValidUUID`, the error goes through `GlobalExceptionHandler.handleValidation()` and produces a clear, field-specific message with the accepted format.
+```
+'event_id': must be a valid UUID (e.g. 550e8400-e29b-41d4-a716-446655440000) (received: 'not-a-uuid')
+```
+
+The `@ValidUUID` constraint and `UuidValidator` in `libs/event-api` remain available for validating UUID strings in path variables or query parameters where the field type must be `String`.
 
 ---
 

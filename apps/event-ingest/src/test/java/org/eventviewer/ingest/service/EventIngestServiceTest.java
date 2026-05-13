@@ -34,7 +34,7 @@ class EventIngestServiceTest {
     @Test
     void ingest_delegatesToPublisher_andReturnsResponse() {
         UUID eventId = UUID.randomUUID();
-        IngestRequest request = new IngestRequest(eventId.toString(), "order-created", null, Map.of("key", "val"));
+        IngestRequest request = new IngestRequest(eventId, "order-created", null, Map.of("key", "val"));
 
         IngestResponse response = service.ingest(request);
 
@@ -47,7 +47,7 @@ class EventIngestServiceTest {
     @Test
     void ingest_whenTimestampAbsent_defaultsToIngestTime() {
         Instant before = Instant.now();
-        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "ping", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID(), "ping", null, null);
 
         IngestResponse response = service.ingest(request);
 

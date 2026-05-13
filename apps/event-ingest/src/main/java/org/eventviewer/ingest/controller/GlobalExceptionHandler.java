@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -32,13 +33,24 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableMessage(HttpMessageNotReadableException ex) {
-        String message = "Request body is missing or malformed";
         Throwable cause = ex.getCause();
         if (cause instanceof InvalidFormatException ife && !ife.getPath().isEmpty()) {
-            String fieldName = ife.getPath().get(0).getFieldName();
-            message = String.format("'%s': invalid value — %s", fieldName, ife.getOriginalMessage());
+            var ref = ife.getPath().get(0);
+            String javaFieldName = ref.getFieldName();
+            Object from = ref.getFrom();
+            Class<?> targetClass = (from instanceof Class<?> c) ? c : (from != null ? from.getClass() : null);
+            String fieldName = resolveJsonPropertyName(targetClass, javaFieldName);
+            Object rejected = ife.getValue();
+            if (UUID.class.equals(ife.getTargetType())) {
+                return ResponseEntity.badRequest().body(ErrorResponse.of(
+                        String.format("'%s': must be a valid UUID (e.g. 550e8400-e29b-41d4-a716-446655440000) (received: '%s')", fieldName, rejected)
+                ));
+            }
+            return ResponseEntity.badRequest().body(ErrorResponse.of(
+                    String.format("'%s': invalid value (received: '%s')", fieldName, rejected)
+            ));
         }
-        return ResponseEntity.badRequest().body(ErrorResponse.of(message));
+        return ResponseEntity.badRequest().body(ErrorResponse.of("Request body is missing or malformed"));
     }
 
     @ExceptionHandler(KafkaException.class)

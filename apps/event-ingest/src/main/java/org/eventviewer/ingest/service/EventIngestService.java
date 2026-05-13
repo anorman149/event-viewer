@@ -20,7 +20,7 @@ public class EventIngestService {
 
     @Timed(value = "event.ingest.service.ingest", description = "Time to process an event through the ingest service layer", histogram = true)
     public IngestResponse ingest(IngestRequest request) {
-        UUID eventId = UUID.fromString(request.eventId()); // safe: @ValidUUID already passed
+        UUID eventId = request.eventId();
         Instant ingestTs = Instant.now();
         Instant timestamp = request.timestamp() != null ? request.timestamp() : ingestTs;
 
