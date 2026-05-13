@@ -34,6 +34,33 @@ Controller behavior must be tested against a real Spring Boot context with live 
 - `src/test/` — pure unit tests: service logic, Kafka/persistence layer, property binding. No Spring context, no containers.
 - `src/itest/` — integration tests: anything involving a controller, Kafka, a database, or any external system. Runs with Docker Compose managed by the root Gradle build.
 
+### Every `apps/*` itest suite must have a single `BaseTest` abstract class
+
+Every Spring Boot application's `src/itest/` package must contain one abstract `BaseTest` class that:
+
+- Carries the `@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)` annotation
+- Declares `@LocalServerPort int port`, `@Autowired TestRestTemplate restTemplate`, and `@Autowired ObjectMapper objectMapper`
+- Provides shared helpers: `authHeaders()`, `baseUrl()`
+
+All `*IT` test classes extend `BaseTest` and carry **no** `@SpringBootTest` annotation of their own.
+
+```java
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+public abstract class BaseTest {
+    @LocalServerPort int port;
+    @Autowired TestRestTemplate restTemplate;
+    @Autowired ObjectMapper objectMapper;
+
+    protected HttpHeaders authHeaders() { ... }
+    protected String baseUrl() { return "http://localhost:" + port; }
+}
+
+class EventIngestIT extends BaseTest { ... }
+class EventIngestValidationIT extends BaseTest { ... }
+```
+
+**Why:** Spring's context caching keys off the `@SpringBootTest` configuration. When all IT classes share the same `BaseTest`, the application context is started once and reused across the entire itest run — no redundant container or application startup per class.
+
 ### Integration tests use the application's `ObjectMapper`
 
 In `@SpringBootTest` tests, inject `@Autowired ObjectMapper objectMapper` to get the application-configured instance (Jackson modules, naming strategies, inclusion rules all match production).
