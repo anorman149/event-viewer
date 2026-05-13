@@ -75,40 +75,50 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 6 — OpenSearch Storage
+## Phase 6 — OpenSearch Schema Manager
 
-**Goal:** Event metadata is indexed in OpenSearch with a production-grade index configuration including ILM, S3 snapshot policy, replica tuning, and surrogate key mapping for rule results.
+**Goal:** A Liquibase-style schema manager library for OpenSearch provides ordered, idempotent, leader-gated migrations at startup; document classes declare their index, template, and alias metadata via annotation; all subsequent OpenSearch phases consume this library.
 
-- [ ] `EventMetadataDocument` record in `libs/opensearch-lib` — fixed fields: `eventId`, `schemaType`, `schemaVersion`, `timestamp`, `ingestTs`, `s3Key`, `batchOffset`, `batchLength`, `ruleSurrogateKey` (int), `ruleResult` (enum: `PASS` / `FAIL` / `NOT_APPLICABLE` / `ERROR`)
-- [ ] `BatchSummaryDocument` record — `s3Key`, `schemaType`, `schemaVersion`, `eventCount`, `firstEventTs`, `lastEventTs`, `compressedSizeBytes`, `uncompressedSizeBytes`, `pod`
-- [ ] Index template `events-metadata-*` — `dynamic: false`, `date_detection: false`; explicit keyword/date/integer mappings for all fixed fields; `events-batches` index for batch summary documents
-- [ ] Surrogate key mapping — `RuleSurrogateKeyRegistry` maintains a `ConcurrentHashMap<UUID, Integer>` (rule UUID → stable integer); integers written to OpenSearch as `rule_id_key`; registry persisted to PostgreSQL on first assignment; loaded at startup
-- [ ] ILM policy — rollover at 50 GB or 7 days; warm phase (force merge to 1 segment) at 1 day; cold at 30 days; delete at configurable TTL (default 90 days)
-- [ ] S3 snapshot repository — `event-viewer-os-snapshots` bucket; snapshot schedule (daily); restore workflow documented; LocalStack in dev
-- [ ] Replica count configurable — `opensearch.index.replicas: 0` for single-node dev; `1` for prod minimum
-- [ ] `EventMetadataIndexer` — bulk indexing with configurable batch size; async flush; Resilience4J circuit breaker around OpenSearch client; retry with backoff on transient failures
-- [ ] `@Timed(histogram=true)` on `bulkIndex()`; `DistributionSummary` for documents per bulk request; `Counter` for index failures and circuit breaker opens
-- [ ] itest against OpenSearch in Docker Compose: index 5,000 documents, verify field mappings, verify ILM policy applied, verify surrogate key stored correctly
+- [ ] Two client interfaces in `libs/opensearch-lib` using the OpenSearch Java Client — `OsAdminClient` (createIndex, deleteIndex, indexExists, refreshIndex, createTemplate, templateExists, clusterSettings) and `OsDocumentClient` (save, get, deleteByQuery, search — search is a stub; full query logic added in Phase 10)
+- [ ] `@OsIndex` annotation — attributes: `indexPattern`, `templateName`, `writeAlias`, `readAlias`; applied directly to document record classes; `OsSchemaRegistry` classpath-scans on startup and caches `OsIndexMetadata` per annotated class; client methods call `registry.getMetadata(MyDoc.class)` to resolve alias names at runtime without hardcoding strings
+- [ ] `OsDocumentClient.save()` backed by `BulkIngester` from the OpenSearch Java Client — configurable flush threshold and interval; callers pass a list of documents and the registry supplies the correct write alias automatically
+- [ ] `OsMigration` abstraction — ordered, named, idempotent migration steps (each step checks `templateExists` / `indexExists` before acting); steps declared as Spring `@Bean` methods inside `@Configuration` classes; `apps/event-ingest` owns all migration configs for its indices
+- [ ] `OsSchemaManager` — collects all `OsMigration` beans at startup, sorts by declared order, executes sequentially; gated by `LeaderAwareScheduler` (Phase 3) so only the leader pod runs migrations; followers skip and rely on the leader having applied changes
+- [ ] itest — two app instances against a shared OpenSearch; verify only one applies migrations; restart both and verify idempotency (no errors re-running against an already-existing template / index)
 
 ---
 
-## Phase 7 — Rules Engine
+## Phase 7 — OpenSearch Storage
+
+**Goal:** Event metadata is indexed in OpenSearch via the Phase 6 schema manager infrastructure with production-grade ILM (hot SSD NVMe → UltraWarm → delete), read/write alias routing, and bulk ingestion via BulkIngester.
+
+- [ ] `EventDocument` record in `apps/event-ingest` annotated `@OsIndex(indexPattern="events-*", templateName="events-template", writeAlias="events_write", readAlias="events_read")` — fields: `eventId`, `schemaType`, `timestamp`, `s3Key`, `batchOffset`, `batchLength`, `ruleResults` (list of `{ruleId, status}` objects)
+- [ ] Index template `events-template` — covers pattern `events-*`; `dynamic: false`, `date_detection: false`; explicit keyword/date/integer mappings for all fixed fields; initial index created with date math name `<events-{now/d}-000001>` (suffix increments on each rollover); template declares `events_write` and `events_read` aliases
+- [ ] ILM policy — hot tier (SSD NVMe): rollover at 130 GB or 12 hours; transition to UltraWarm after rollover; UltraWarm retention: 4 days, then auto-delete; no cold tier; policy attached to the template via `index.lifecycle.name`
+- [ ] S3 snapshots — use the default AWS-managed automated snapshot policy (hourly snapshots, 14-day retention on the AWS-managed bucket); 14-day retention comfortably outlasts the 4.5-day hot + warm lifecycle; no custom snapshot repository needed
+- [ ] Replica count configurable — `opensearch.index.replicas: 0` for single-node dev; `1` for prod minimum; applied via an `OsMigration` cluster settings step
+- [ ] `EventDocumentIndexer` in `apps/event-ingest` — calls `OsDocumentClient.save()` (BulkIngester-backed); async flush; Resilience4J circuit breaker; retry with backoff on transient failures
+- [ ] `@Timed(histogram=true)` on bulk index; `DistributionSummary` for documents per bulk request; `Counter` for index failures and circuit breaker opens
+- [ ] itest against OpenSearch in Docker Compose: index events, verify field mappings, verify ILM policy applied, verify write alias routes to the active index, verify read alias resolves correctly
+
+---
+
+## Phase 8 — Rules Engine
 
 **Goal:** Configurable validation rules are defined in PostgreSQL, cached in the ingest service, and evaluated in parallel against incoming events; rule results are indexed in OpenSearch per event.
 
 - [ ] `Schema` entity in PostgreSQL (`apps/management`) — `schema_id`, `name`, `version`, `description`, `created_at`; Flyway migration; JPA entity; REST CRUD (`/api/v1/schemas`)
 - [ ] `Rule` entity in PostgreSQL — `rule_id`, `schema_id` (FK), `name`, `rule_type` (enum: `FIELD_EXISTS`, `FIELD_EQUALS`, `FIELD_REGEX`, `FIELD_RANGE`, `REQUIRED_FIELD_LIST`), `condition_expression` (JSON), `severity` (enum: `INFO` / `WARN` / `ERROR`), `enabled`; REST CRUD (`/api/v1/rules`, `/api/v1/schemas/{name}/rules`)
-- [ ] `RuleSurrogateKeyRegistry` extended — assigns surrogate int to each `rule_id` UUID; persisted to PostgreSQL; loaded at `event-ingest` startup via management app REST call
 - [ ] Rule cache in `apps/event-ingest` — Caffeine cache keyed by schema name; TTL configurable (`rule-cache.ttl-seconds`); refreshed on `@Scheduled` interval (leader-aware via Phase 3); `rule_cache.hits` / `rule_cache.misses` counters
-- [ ] `RuleEvaluationEngine` — groups 5,000-event batch by `schemaType`; submits one virtual-thread task per schema group; each task evaluates all enabled rules for that schema against all events in the group; returns `List<RuleEvaluationResult>` per event
-- [ ] `RuleEvaluationResult` — `eventId`, `ruleId`, `ruleSurrogateKey`, `ruleResult` (enum), `evaluationTimeNs`
-- [ ] Failed-rule events are NOT discarded — indexed in OpenSearch with `ruleResult = FAIL`; only system/parse errors route to dead-letter
+- [ ] `RuleEvaluationEngine` — groups the current Kafka consumer batch by `schemaType`; submits one virtual-thread task per schema group; each task evaluates all enabled rules for that schema against all events in the group; returns `List<RuleEvaluationResult>` per event
+- [ ] `RuleEvaluationResult` — `eventId`, `ruleId`, `ruleResult` (enum: `PASS` / `FAIL` / `NOT_APPLICABLE` / `ERROR`), `evaluationTimeNs`
+- [ ] Failed-rule events are NOT discarded — indexed in OpenSearch with `status = FAIL` in the `ruleResults` list; only system/parse errors route to dead-letter
 - [ ] `@Timed(histogram=true)` on `RuleEvaluationEngine.evaluate()`; `Counter` for rules evaluated, rule failures per `rule_id`; `DistributionSummary` for events per batch group
-- [ ] Unit tests for each rule type; itest: register schema + rule via management API, publish events, consume, assert `ruleResult` in OpenSearch index
+- [ ] Unit tests for each rule type; itest: register schema + rule via management API, publish events, consume, assert `ruleResults` in OpenSearch index
 
 ---
 
-## Phase 8 — Ingest Benchmarking
+## Phase 9 — Ingest Benchmarking
 
 **Goal:** End-to-end throughput is baselined and the primary bottleneck on the path to 1M events/sec is identified and documented.
 
@@ -121,17 +131,17 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 9 — Metadata Search
+## Phase 10 — Metadata Search
 
 **Goal:** Events are queryable with full boolean search returning paginated metadata.
 
-- [ ] OpenSearch query service — full boolean search (AND / NOT / OR), keyword, time-range, and schema-type filters
+- [ ] OpenSearch query service — full boolean search (AND / NOT / OR), keyword, time-range, and schema-type filters; implements the search stub defined in Phase 6 `OsDocumentClient`
 - [ ] REST search endpoint (`GET /search/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
 - [ ] Pagination and cursor-based result streaming for large result sets
 
 ---
 
-## Phase 10 — Payload Retrieval & API Contract
+## Phase 11 — Payload Retrieval & API Contract
 
 **Goal:** Raw event payloads are retrievable from S3; a typed API contract is published for frontend consumers.
 
@@ -140,7 +150,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 11 — Frontend Event Explorer
+## Phase 12 — Frontend Event Explorer
 
 **Goal:** Users can find and inspect any event through the UI.
 
@@ -152,7 +162,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 12 — Real-Time Event Feed
+## Phase 13 — Real-Time Event Feed
 
 **Goal:** Users see events arrive live without polling.
 
@@ -164,7 +174,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 13 — Dashboards & Visualizations
+## Phase 14 — Dashboards & Visualizations
 
 **Goal:** Users can build and save custom visual layouts.
 
@@ -176,7 +186,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 14 — Alerting & Notifications
+## Phase 15 — Alerting & Notifications
 
 **Goal:** Users are notified when event patterns meet defined thresholds.
 
@@ -188,7 +198,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 15 — Authentication & Access Control
+## Phase 16 — Authentication & Access Control
 
 **Goal:** Every action in the system is authenticated and authorized.
 
@@ -200,7 +210,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 16 — Collaboration & Export
+## Phase 17 — Collaboration & Export
 
 **Goal:** Insights are shareable and portable.
 
@@ -211,7 +221,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 17 — Data Retention & Archiving
+## Phase 18 — Data Retention & Archiving
 
 **Goal:** Old data ages out automatically per policy; nothing is silently lost.
 
@@ -223,7 +233,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 18 — Observability & Operations
+## Phase 19 — Observability & Operations
 
 **Goal:** The platform can monitor itself and support on-call engineers.
 
@@ -235,7 +245,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 19 — Resilience & Disaster Recovery
+## Phase 20 — Resilience & Disaster Recovery
 
 **Goal:** The system survives failures and can be recovered to a known state.
 
@@ -254,19 +264,20 @@ Phase 1 (Skeleton)
   └─ Phase 2 (Kafka Ingest: topic + REST endpoint)
        └─ Phase 3 (Leader Election: K8s lease, LeaderAwareScheduler, KafkaLagMonitor)
             └─ Phase 4 (Kafka Consumer: batch listener, SASL, manual ack, retry/DLT)
-                 └─ Phase 5 (S3 Storage: ZSTD batch writer, Hive keys, byte-range GET)
-                 └─ Phase 6 (OpenSearch Storage: metadata index, ILM, snapshots, surrogates)
-                      └─ Phase 7 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)
-                           └─ Phase 8 (Ingest Benchmarking: end-to-end throughput baseline)
-                                └─ Phase 9 (Metadata Search: boolean query, pagination)
-                                     └─ Phase 10 (Payload Retrieval & API Contract)
-                                          └─ Phase 11 (Frontend Event Explorer)
-                                          └─ Phase 12 (Live Feed) ← also needs Phase 3
-                                               └─ Phase 13 (Dashboards)
-                                                    └─ Phase 14 (Alerting)
-Phase 15 (Auth) ← can start after Phase 1, applied across all phases
-Phase 16 (Collaboration) ← needs Phase 13 + Phase 15
-Phase 17 (Retention) ← needs Phase 5 + Phase 7
-Phase 18 (Observability) ← can layer in at any phase
-Phase 19 (DR) ← after Phase 18
+                 └─ Phase 5 (S3 Storage: per-event ZSTD, Hive keys, virtual-thread GET Range)
+                 └─ Phase 6 (OpenSearch Schema Manager: OsAdminClient, OsDocumentClient, @OsIndex, OsSchemaManager) ← also needs Phase 3
+                      └─ Phase 7 (OpenSearch Storage: EventDocument, ILM hot→UltraWarm, aliases, BulkIngester)
+                           └─ Phase 8 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)
+                                └─ Phase 9 (Ingest Benchmarking: end-to-end throughput baseline)
+                                     └─ Phase 10 (Metadata Search: boolean query, pagination)
+                                          └─ Phase 11 (Payload Retrieval & API Contract)
+                                               └─ Phase 12 (Frontend Event Explorer)
+                                               └─ Phase 13 (Live Feed) ← also needs Phase 3
+                                                    └─ Phase 14 (Dashboards)
+                                                         └─ Phase 15 (Alerting)
+Phase 16 (Auth) ← can start after Phase 1, applied across all phases
+Phase 17 (Collaboration) ← needs Phase 14 + Phase 16
+Phase 18 (Retention) ← needs Phase 5 + Phase 8
+Phase 19 (Observability) ← can layer in at any phase
+Phase 20 (DR) ← after Phase 19
 ```
