@@ -89,7 +89,7 @@ curl -s http://localhost:8081/actuator/health | jq .status
 **d. Generate a dev JWT**
 
 ```bash
-# Requires dev-private.pem from docker-compose.env
+# Requires local-private.pem from docker-compose.env
 ./scripts/generate-dev-jwt.sh
 # Outputs a signed JWT — copy it as DEV_JWT for the next steps
 ```

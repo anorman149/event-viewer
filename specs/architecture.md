@@ -253,7 +253,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          public-key-location: classpath:keys/platform-public.pem
+          public-key-location: classpath:keys/local-public.pem
 ```
 
 The public key (`platform-public.pem`) is committed to `src/main/resources/keys/` in each app. The corresponding private key is never committed; it lives in `docker-compose.env` (gitignored) for local dev JWT generation and in a secrets manager in production.

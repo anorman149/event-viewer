@@ -4,9 +4,9 @@
 # Requires: openssl (available on Linux, macOS, and Windows via Git Bash or WSL)
 #
 # The private key is read from DEV_PRIVATE_KEY_PATH (docker-compose.env) or defaults
-# to dev-private.pem in the repo root. Generate it once with:
-#   openssl genrsa -out dev-private.pem 2048
-#   openssl rsa -in dev-private.pem -pubout -out platform-public.pem
+# to local-private.pem in the repo root. Generate it once with:
+#   openssl genrsa -out local-private.pem 2048
+#   openssl rsa -in local-private.pem -pubout -out local-public.pem
 
 set -euo pipefail
 
@@ -20,13 +20,13 @@ if [[ -f "$ENV_FILE" ]]; then
     set -a; source "$ENV_FILE"; set +a
 fi
 
-PRIVATE_KEY="${DEV_PRIVATE_KEY_PATH:-$REPO_ROOT/dev-private.pem}"
+PRIVATE_KEY="${DEV_PRIVATE_KEY_PATH:-$REPO_ROOT/local-private.pem}"
 
 if [[ ! -f "$PRIVATE_KEY" ]]; then
     echo "ERROR: private key not found at $PRIVATE_KEY" >&2
     echo "Generate it with:" >&2
-    echo "  openssl genrsa -out dev-private.pem 2048" >&2
-    echo "  openssl rsa -in dev-private.pem -pubout -out platform-public.pem" >&2
+    echo "  openssl genrsa -out local-private.pem 2048" >&2
+    echo "  openssl rsa -in local-private.pem -pubout -out platform-public.pem" >&2
     exit 1
 fi
 

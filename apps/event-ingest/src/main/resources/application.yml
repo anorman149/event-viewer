@@ -17,7 +17,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          public-key-location: classpath:keys/platform-public.pem
+          public-key-location: classpath:keys/local-public.pem
   kafka:
     bootstrap-servers: localhost:9092
     producer:

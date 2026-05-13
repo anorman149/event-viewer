@@ -28,9 +28,9 @@ public final class TestJwtFactory {
     }
 
     private static PrivateKey loadPrivateKey() {
-        try (InputStream is = TestJwtFactory.class.getResourceAsStream("/keys/dev-private.pem")) {
+        try (InputStream is = TestJwtFactory.class.getResourceAsStream("/keys/local-private.pem")) {
             if (is == null) {
-                throw new IllegalStateException("dev-private.pem not found in itest resources at /keys/dev-private.pem");
+                throw new IllegalStateException("local-private.pem not found in itest resources at /keys/local-private.pem");
             }
             String pem = new String(is.readAllBytes(), StandardCharsets.UTF_8)
                     .replace("-----BEGIN PRIVATE KEY-----", "")
@@ -40,7 +40,7 @@ public final class TestJwtFactory {
             KeyFactory kf = KeyFactory.getInstance("RSA");
             return kf.generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to load dev private key", e);
+            throw new IllegalStateException("Failed to load local private key", e);
         }
     }
 }

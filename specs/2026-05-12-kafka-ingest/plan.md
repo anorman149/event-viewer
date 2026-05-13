@@ -58,8 +58,8 @@ Wire Kafka topic provisioning, the REST ingest endpoint, Jackson, virtual thread
 
 1. **Dev RSA key pair:** Generate a 2048-bit RSA key pair for local development:
    ```bash
-   openssl genrsa -out dev-private.pem 2048
-   openssl rsa -in dev-private.pem -pubout -out platform-public.pem
+   openssl genrsa -out local-private.pem 2048
+   openssl rsa -in local-private.pem -pubout -out local-public.pem
    ```
    - Commit `platform-public.pem` to `src/main/resources/keys/` in **every** `apps/*` subproject
    - Add `dev-private.pem` to `docker-compose.env` (gitignored); add placeholder to `docker-compose.env.example`
@@ -88,7 +88,7 @@ Wire Kafka topic provisioning, the REST ingest endpoint, Jackson, virtual thread
        oauth2:
          resourceserver:
            jwt:
-             public-key-location: classpath:keys/platform-public.pem
+             public-key-location: classpath:keys/local-public.pem
      kafka:
        bootstrap-servers: localhost:9092
        producer:

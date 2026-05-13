@@ -42,8 +42,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Run event-ingest integration tests
-        run: ./gradlew :apps:event-ingest:itest
+      - name: Run integration tests
+        run: ./gradlew itest
 
   # ── Frontend: type-check + build ──────────────────────────────────────────
   frontend:

@@ -43,7 +43,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          public-key-location: classpath:keys/platform-public.pem
+          public-key-location: classpath:keys/local-public.pem
 ```
 
 The `platform-public.pem` RSA-2048 public key is committed to `src/main/resources/keys/` in each app. The corresponding private key lives only in `docker-compose.env` (gitignored) for local JWT generation. Phase 11 replaces this with a real OIDC provider and JWKS endpoint.
