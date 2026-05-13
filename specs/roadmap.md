@@ -29,31 +29,98 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 3 — Storage Consumers
+## Phase 3 — Leader Election
 
-**Goal:** Events consumed from Kafka are persisted to all three stores and throughput is baselined.
+**Goal:** Distributed leadership coordination ensures that exactly one pod runs scheduled tasks at any time. All future phases that require a singleton scheduler (lag monitoring, rule-cache refresh, retention jobs) depend on this infrastructure.
 
-- [ ] Kafka consumer → S3 batch writer: accumulate 5,000 events, flush as ZSTD-compressed file with Hive-style key (`year=/month=/day=/hour=/schema_type=/pod=/<uuid>.zst`)
-- [ ] Kafka consumer → OpenSearch metadata index: one document per event with `s3_key`, `batch_offset`, `batch_length`, indexed metadata fields
-- [ ] Kafka consumer → PostgreSQL: write ingest audit record (batch key, event count, flush timestamp) — no raw event data
-- [ ] Ingest throughput benchmark — establish baseline, target path to 1M events/sec
-
----
-
-## Phase 4 — Schema Registry
-
-**Goal:** Event types are defined in PostgreSQL, versioned, and enforced at ingest.
-
-- [ ] Schema definition model in PostgreSQL (name, version, Avro schema, compatibility mode)
-- [ ] Confluent Schema Registry integration for Avro serialization on the Kafka wire
-- [ ] REST API to register and retrieve schema types (`/api/v1/schemas`)
-- [ ] Schema validation applied at ingest — reject malformed events with 422; route failures to dead-letter topic
-- [ ] Schema versioning with backward-compatibility check on registration
-- [ ] Admin UI page: schema browser (list, view, register new type)
+- [ ] K8s leader election via Coordination API (Lease objects) using official Kubernetes Java client; isolated in new `libs/leader` library (keeps heavy `client-java` transitive deps out of `libs/common`)
+- [ ] `LeaderElectionService` — acquires and renews a Lease; publishes `LeaderElectionEvent` (ACQUIRED / RELINQUISHED) to the Spring `ApplicationEventPublisher`; exposes `isLeader()` for synchronous checks
+- [ ] `LeaderAwareScheduler` abstraction — wraps any `Runnable` to only execute on the current leader pod; no-op on followers
+- [ ] Non-K8s fallback — `kubernetes.leader-election.enabled=false` causes `isLeader()` to always return `true` (single-node dev / CI mode)
+- [ ] `KafkaLagMonitor` in `apps/event-ingest` — `@Scheduled` bean (interval: 60 s); runs via `LeaderAwareScheduler`; queries Kafka `AdminClient` for consumer group lag on all configured topics; emits `kafka.consumer.lag` gauge per (topic, partition, consumer-group) tuple
+- [ ] K8s RBAC manifests in `infra/k8s/` — `ServiceAccount`, `Role` (leases: get/create/update), `RoleBinding`; `MY_POD_NAME` and `MY_POD_NAMESPACE` injected via downward API; `infra/` is the root folder for all infrastructure-as-code
+- [ ] Local K8s deployment test — `event-ingest` deployed at 2 replicas; verify single leader, verify leadership transfer after pod kill
+- [ ] Observability — `leader_election_acquisitions_total` counter, `leader_election_is_leader` gauge (1/0), `kafka_consumer_lag` gauge per partition
 
 ---
 
-## Phase 5 — Metadata Search
+## Phase 4 — Kafka Consumer
+
+**Goal:** Events are consumed from 4 sharded topics with production-grade configuration: dynamic listeners from properties (no `@KafkaListener`), static membership for pod-restart resilience, cooperative sticky rebalancing, manual batch acknowledgment, SASL security, and a full retry → DLT pipeline. Parse failures are metered and skipped — DLT stays clean.
+
+- [ ] Topic topology — 4 topics (`event-raw-1` … `event-raw-4`), 80 partitions × 1 replica (prod); 2 partitions (local); DLT topics provisioned automatically at `{topic}.DLT`; all topics created via `KafkaAdmin` from `EventConsumerProperties`
+- [ ] Dynamic container creation — one `ConcurrentMessageListenerContainer` per topic, created programmatically from properties in `EventConsumerContainerFactory` (implements `SmartLifecycle`); no `@KafkaListener` annotations; concurrency configurable (default 20 prod, 1 local)
+- [ ] Consumer settings — `CooperativeStickyAssignor`, `group.instance.id = {MY_POD_NAME}-{topic}-{threadIndex}` for static membership, `AckMode.MANUAL_IMMEDIATE`, `BatchAcknowledgingMessageListener` (both main and DLT); concurrency computed at runtime via `computeConcurrency(partitionsPerTopic, INGEST_POD_COUNT_env)`; virtual thread executor per container; `session.timeout.ms=45000`, `max.poll.interval.ms=300000`, `max.poll.records=500`, `heartbeat.interval.ms=3000`, fetch settings tuned for 50 MB/request
+- [ ] SASL/SCRAM-SHA-512 — plaintext in dev; `security.protocol=SASL_SSL` in prod; `sasl.jaas.config` injected via `KAFKA_SASL_JAAS_CONFIG` env var; never committed
+- [ ] `EventBatchListener` — per-record parse: `JsonProcessingException` caught, metered (`kafka.consumer.parse.failures`), skipped; valid records forwarded to `IngestPipelineService.process()` stub; `acknowledge()` called once per batch regardless
+- [ ] `DefaultErrorHandler` — 3-attempt exponential backoff (1 s → 2 s → 4 s); `DeadLetterPublishingRecoverer` routes to `{topic}.DLT`; `JsonProcessingException` is non-retryable
+- [ ] `DltConsumerContainerFactory` — one DLT container per topic (concurrency = 1, group `event-ingest-dlt-group`); `DltBatchMessageListener` retries up to 100 times (5 s fixed); `dlt.recovered` / `dlt.exhausted` counters
+- [ ] Kafka lag metrics from Phase 3 `KafkaLagMonitor` registered for both `event-ingest-group` and `event-ingest-dlt-group`
+
+---
+
+## Phase 5 — S3 Storage
+
+**Goal:** Events are flushed as ZSTD-compressed Hive-partitioned batch files to S3 with full performance tuning, per-event byte-range tracking, and production-grade security.
+
+- [ ] `HiveKeyBuilder` in `libs/s3-lib` — constructs `events/year=YYYY/month=MM/day=DD/hour=HH/schema_type=<type>/pod=<pod>/<uuid>.zst` from partition params; pod name injected from `MY_POD_NAME` env var
+- [ ] `S3BatchBuffer` — thread-safe accumulator; triggers flush on 5,000 events OR 30-second elapsed time (whichever comes first); records per-event byte offset within uncompressed stream
+- [ ] `S3BatchWriter` — serializes buffer to ZSTD level-3 compressed bytes; records compressed/uncompressed sizes; executes S3 PUT; returns `S3BatchResult` (s3Key, List of per-event byte offsets + lengths, sizes)
+- [ ] Multi-threaded GET with byte-range — `S3RangeReader` fetches a single event's bytes using `Range: bytes=N-M`; configurable thread pool for parallel multi-chunk downloads
+- [ ] AWS S3 client config — connection pool size, request timeout, retry strategy (SDK default + Resilience4J); transfer manager for multipart upload on batches > configurable threshold
+- [ ] Security — IAM role / instance profile in prod; LocalStack dummy credentials (`AWS_ACCESS_KEY_ID=test`) in dev; credentials never committed; S3 bucket policy enforces server-side encryption at rest
+- [ ] `DistributionSummary` for batch event count, compressed bytes, uncompressed bytes; `@Timed(histogram=true)` on `S3BatchWriter.flush()` and `S3RangeReader.fetch()`; `Counter` for flush count, S3 PUT failures
+- [ ] Unit tests (mock S3 client) + itest against LocalStack: flush 5,000 events, verify object exists, verify ZSTD decompression, verify per-event byte offsets correct
+
+---
+
+## Phase 6 — OpenSearch Storage
+
+**Goal:** Event metadata is indexed in OpenSearch with a production-grade index configuration including ILM, S3 snapshot policy, replica tuning, and surrogate key mapping for rule results.
+
+- [ ] `EventMetadataDocument` record in `libs/opensearch-lib` — fixed fields: `eventId`, `schemaType`, `schemaVersion`, `timestamp`, `ingestTs`, `s3Key`, `batchOffset`, `batchLength`, `ruleSurrogateKey` (int), `ruleResult` (enum: `PASS` / `FAIL` / `NOT_APPLICABLE` / `ERROR`)
+- [ ] `BatchSummaryDocument` record — `s3Key`, `schemaType`, `schemaVersion`, `eventCount`, `firstEventTs`, `lastEventTs`, `compressedSizeBytes`, `uncompressedSizeBytes`, `pod`
+- [ ] Index template `events-metadata-*` — `dynamic: false`, `date_detection: false`; explicit keyword/date/integer mappings for all fixed fields; `events-batches` index for batch summary documents
+- [ ] Surrogate key mapping — `RuleSurrogateKeyRegistry` maintains a `ConcurrentHashMap<UUID, Integer>` (rule UUID → stable integer); integers written to OpenSearch as `rule_id_key`; registry persisted to PostgreSQL on first assignment; loaded at startup
+- [ ] ILM policy — rollover at 50 GB or 7 days; warm phase (force merge to 1 segment) at 1 day; cold at 30 days; delete at configurable TTL (default 90 days)
+- [ ] S3 snapshot repository — `event-viewer-os-snapshots` bucket; snapshot schedule (daily); restore workflow documented; LocalStack in dev
+- [ ] Replica count configurable — `opensearch.index.replicas: 0` for single-node dev; `1` for prod minimum
+- [ ] `EventMetadataIndexer` — bulk indexing with configurable batch size; async flush; Resilience4J circuit breaker around OpenSearch client; retry with backoff on transient failures
+- [ ] `@Timed(histogram=true)` on `bulkIndex()`; `DistributionSummary` for documents per bulk request; `Counter` for index failures and circuit breaker opens
+- [ ] itest against OpenSearch in Docker Compose: index 5,000 documents, verify field mappings, verify ILM policy applied, verify surrogate key stored correctly
+
+---
+
+## Phase 7 — Rules Engine
+
+**Goal:** Configurable validation rules are defined in PostgreSQL, cached in the ingest service, and evaluated in parallel against incoming events; rule results are indexed in OpenSearch per event.
+
+- [ ] `Schema` entity in PostgreSQL (`apps/management`) — `schema_id`, `name`, `version`, `description`, `created_at`; Flyway migration; JPA entity; REST CRUD (`/api/v1/schemas`)
+- [ ] `Rule` entity in PostgreSQL — `rule_id`, `schema_id` (FK), `name`, `rule_type` (enum: `FIELD_EXISTS`, `FIELD_EQUALS`, `FIELD_REGEX`, `FIELD_RANGE`, `REQUIRED_FIELD_LIST`), `condition_expression` (JSON), `severity` (enum: `INFO` / `WARN` / `ERROR`), `enabled`; REST CRUD (`/api/v1/rules`, `/api/v1/schemas/{name}/rules`)
+- [ ] `RuleSurrogateKeyRegistry` extended — assigns surrogate int to each `rule_id` UUID; persisted to PostgreSQL; loaded at `event-ingest` startup via management app REST call
+- [ ] Rule cache in `apps/event-ingest` — Caffeine cache keyed by schema name; TTL configurable (`rule-cache.ttl-seconds`); refreshed on `@Scheduled` interval (leader-aware via Phase 3); `rule_cache.hits` / `rule_cache.misses` counters
+- [ ] `RuleEvaluationEngine` — groups 5,000-event batch by `schemaType`; submits one virtual-thread task per schema group; each task evaluates all enabled rules for that schema against all events in the group; returns `List<RuleEvaluationResult>` per event
+- [ ] `RuleEvaluationResult` — `eventId`, `ruleId`, `ruleSurrogateKey`, `ruleResult` (enum), `evaluationTimeNs`
+- [ ] Failed-rule events are NOT discarded — indexed in OpenSearch with `ruleResult = FAIL`; only system/parse errors route to dead-letter
+- [ ] `@Timed(histogram=true)` on `RuleEvaluationEngine.evaluate()`; `Counter` for rules evaluated, rule failures per `rule_id`; `DistributionSummary` for events per batch group
+- [ ] Unit tests for each rule type; itest: register schema + rule via management API, publish events, consume, assert `ruleResult` in OpenSearch index
+
+---
+
+## Phase 8 — Ingest Benchmarking
+
+**Goal:** End-to-end throughput is baselined and the primary bottleneck on the path to 1M events/sec is identified and documented.
+
+- [ ] Load-test harness in `apps/event-ingest/src/itest` — configurable event count (default 1M), payload size distribution, consumer concurrency, batch size
+- [ ] Measure: events/sec from first Kafka produce to last S3 flush + OpenSearch index; S3 PUT throughput; OpenSearch bulk index throughput; Kafka consumer poll latency; rule evaluation overhead
+- [ ] JVM tuning sweep — test with default JVM settings, then with tuned GC (`-XX:+UseZGC`), then with tuned virtual thread pool sizes; document delta
+- [ ] Bottleneck identification — record which stage is the ceiling at each concurrency level
+- [ ] Document results in `specs/2026-05-13-storage-consumers/benchmark-results.md` — hardware spec, JVM version, settings used, events/sec achieved per stage
+- [ ] Target: establish baseline; remediate top bottleneck if below 100K events/sec; document path to 1M events/sec with horizontal scaling model
+
+---
+
+## Phase 9 — Metadata Search
 
 **Goal:** Events are queryable with full boolean search returning paginated metadata.
 
@@ -63,7 +130,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 6 — Payload Retrieval & API Contract
+## Phase 10 — Payload Retrieval & API Contract
 
 **Goal:** Raw event payloads are retrievable from S3; a typed API contract is published for frontend consumers.
 
@@ -72,7 +139,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 7 — Frontend Event Explorer
+## Phase 11 — Frontend Event Explorer
 
 **Goal:** Users can find and inspect any event through the UI.
 
@@ -84,7 +151,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 8 — Real-Time Event Feed
+## Phase 12 — Real-Time Event Feed
 
 **Goal:** Users see events arrive live without polling.
 
@@ -96,7 +163,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 9 — Dashboards & Visualizations
+## Phase 13 — Dashboards & Visualizations
 
 **Goal:** Users can build and save custom visual layouts.
 
@@ -108,7 +175,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 10 — Alerting & Notifications
+## Phase 14 — Alerting & Notifications
 
 **Goal:** Users are notified when event patterns meet defined thresholds.
 
@@ -120,7 +187,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 11 — Authentication & Access Control
+## Phase 15 — Authentication & Access Control
 
 **Goal:** Every action in the system is authenticated and authorized.
 
@@ -132,7 +199,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 12 — Collaboration & Export
+## Phase 16 — Collaboration & Export
 
 **Goal:** Insights are shareable and portable.
 
@@ -143,7 +210,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 13 — Data Retention & Archiving
+## Phase 17 — Data Retention & Archiving
 
 **Goal:** Old data ages out automatically per policy; nothing is silently lost.
 
@@ -155,7 +222,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 14 — Observability & Operations
+## Phase 18 — Observability & Operations
 
 **Goal:** The platform can monitor itself and support on-call engineers.
 
@@ -167,7 +234,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 15 — Resilience & Disaster Recovery
+## Phase 19 — Resilience & Disaster Recovery
 
 **Goal:** The system survives failures and can be recovered to a known state.
 
@@ -184,17 +251,21 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 ```
 Phase 1 (Skeleton)
   └─ Phase 2 (Kafka Ingest: topic + REST endpoint)
-       └─ Phase 3 (Storage Consumers: S3 + OpenSearch + PostgreSQL audit)
-            └─ Phase 4 (Schema Registry)
-            └─ Phase 5 (Metadata Search)
-                 └─ Phase 6 (Payload Retrieval & API Contract)
-                      └─ Phase 7 (Explorer UI)
-                      └─ Phase 8 (Live Feed)  ← also needs Phase 3
-                           └─ Phase 9 (Dashboards — OpenSearch aggregations)
-                                └─ Phase 10 (Alerting — OpenSearch + PostgreSQL rules)
-Phase 11 (Auth) ← can start after Phase 1, applied across all phases
-Phase 12 (Collaboration) ← needs Phase 9 + Phase 11
-Phase 13 (Retention) ← needs Phase 3 + Phase 4
-Phase 14 (Observability) ← can layer in at any phase
-Phase 15 (DR) ← after Phase 14
+       └─ Phase 3 (Leader Election: K8s lease, LeaderAwareScheduler, KafkaLagMonitor)
+            └─ Phase 4 (Kafka Consumer: batch listener, SASL, manual ack, retry/DLT)
+                 └─ Phase 5 (S3 Storage: ZSTD batch writer, Hive keys, byte-range GET)
+                 └─ Phase 6 (OpenSearch Storage: metadata index, ILM, snapshots, surrogates)
+                      └─ Phase 7 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)
+                           └─ Phase 8 (Ingest Benchmarking: end-to-end throughput baseline)
+                                └─ Phase 9 (Metadata Search: boolean query, pagination)
+                                     └─ Phase 10 (Payload Retrieval & API Contract)
+                                          └─ Phase 11 (Frontend Event Explorer)
+                                          └─ Phase 12 (Live Feed) ← also needs Phase 3
+                                               └─ Phase 13 (Dashboards)
+                                                    └─ Phase 14 (Alerting)
+Phase 15 (Auth) ← can start after Phase 1, applied across all phases
+Phase 16 (Collaboration) ← needs Phase 13 + Phase 15
+Phase 17 (Retention) ← needs Phase 5 + Phase 7
+Phase 18 (Observability) ← can layer in at any phase
+Phase 19 (DR) ← after Phase 18
 ```
