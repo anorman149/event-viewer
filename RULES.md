@@ -155,6 +155,51 @@ spring:
       observation-enabled: true   # add when consumers are implemented
 ```
 
+### Validation error messages must identify the field and what was expected
+
+`GlobalExceptionHandler.handleValidation()` must resolve the JSON property name (via `@JsonProperty` reflection on the target class) and include the rejected value when present. Error messages must clearly identify which field failed and why.
+
+**Format:** `"'<json-property-name>': <constraint-message>"` — e.g., `"'event_id': must not be null"` or `"'event_id': must be a valid UUID (received: 'not-a-uuid')"`.
+
+`handleUnreadableMessage()` handles JSON parse failures (missing body, wrong types) with a similarly descriptive message that includes the field name and invalid value.
+
+### UUID fields must use `@ValidUUID String` — not the `UUID` type
+
+Incoming UUID fields on request records must be declared as `String` with `@NotNull @ValidUUID`. The `@ValidUUID` constraint and `UuidValidator` live in `libs/event-api`. The service layer parses the validated string to `UUID` via `UUID.fromString()`.
+
+**Why:** When a field is typed `UUID`, Jackson throws `HttpMessageNotReadableException` on bad input — bypassing Bean Validation entirely and returning a cryptic error. With `String` + `@ValidUUID`, the error goes through `GlobalExceptionHandler.handleValidation()` and produces a clear, field-specific message with the accepted format.
+
+---
+
+## Logging
+
+### Every `application.yml` must declare the log pattern and default log level
+
+All `apps/*` `application.yml` files must include:
+```yaml
+logging:
+  level:
+    root: error
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level %magenta([${spring.application.name},%X{traceId:-},%X{spanId:-}]) %cyan(%logger{36}) - %msg%n"
+```
+
+- **Default level `error`** — production default; only errors are logged. Lower levels are enabled via the local profile.
+- **`%X{traceId:-}` / `%X{spanId:-}`** — Micrometer Tracing (Brave bridge) writes these MDC keys on every request. They appear as `-` when no active trace exists.
+- **`${spring.application.name}`** — makes each app's logs immediately identifiable in aggregated log streams.
+
+### Local development uses `application-local.yml`
+
+Every `apps/*` app must have an `application-local.yml` alongside `application.yml`:
+```yaml
+logging:
+  level:
+    root: info
+    org.eventviewer: debug
+```
+
+Activate with `--spring.profiles.active=local` in your IDE run configuration or with `SPRING_PROFILES_ACTIVE=local` environment variable. Never commit this profile active in `application.yml`.
+
 ---
 
 ## Build

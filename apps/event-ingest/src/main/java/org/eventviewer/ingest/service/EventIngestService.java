@@ -7,6 +7,7 @@ import org.eventviewer.ingest.kafka.KafkaEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Service
 public class EventIngestService {
@@ -19,11 +20,12 @@ public class EventIngestService {
 
     @Timed(value = "event.ingest.service.ingest", description = "Time to process an event through the ingest service layer", histogram = true)
     public IngestResponse ingest(IngestRequest request) {
+        UUID eventId = UUID.fromString(request.eventId()); // safe: @ValidUUID already passed
         Instant ingestTs = Instant.now();
         Instant timestamp = request.timestamp() != null ? request.timestamp() : ingestTs;
 
-        kafkaEventPublisher.publish(request.eventId(), request.schemaType(), timestamp, ingestTs, request.payload());
+        kafkaEventPublisher.publish(eventId, request.schemaType(), timestamp, ingestTs, request.payload());
 
-        return new IngestResponse(request.eventId(), ingestTs);
+        return new IngestResponse(eventId, ingestTs);
     }
 }

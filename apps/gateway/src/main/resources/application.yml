@@ -107,3 +107,9 @@ management:
         - b3
       produce:
         - w3c
+
+logging:
+  level:
+    root: error
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level %magenta([${spring.application.name},%X{traceId:-},%X{spanId:-}]) %cyan(%logger{36}) - %msg%n"

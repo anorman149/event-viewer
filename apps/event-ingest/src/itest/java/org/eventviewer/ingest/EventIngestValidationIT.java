@@ -58,7 +58,7 @@ class EventIngestValidationIT {
     @Test
     void missingSchemaType_returns400() throws Exception {
         // Serialize IngestRequest with null schemaType — omitted from JSON
-        IngestRequest request = new IngestRequest(UUID.randomUUID(), null, null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), null, null, null);
         assertThat(post(request).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 

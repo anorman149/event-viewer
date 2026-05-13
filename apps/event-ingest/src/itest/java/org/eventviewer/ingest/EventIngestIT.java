@@ -65,8 +65,9 @@ class EventIngestIT {
 
     @Test
     void happyPath_returns202_andMessageLandsOnKafka() throws Exception {
+        UUID eventId = UUID.randomUUID();
         IngestRequest request = new IngestRequest(
-                UUID.randomUUID(), "order-created", null, Map.of("order_id", "ORD-1", "amount", 49.99));
+                eventId.toString(), "order-created", null, Map.of("order_id", "ORD-1", "amount", 49.99));
 
         ResponseEntity<IngestResponse> response = restTemplate.exchange(
                 url(), HttpMethod.POST,
@@ -74,7 +75,7 @@ class EventIngestIT {
                 IngestResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
-        assertThat(response.getBody().eventId()).isEqualTo(request.eventId());
+        assertThat(response.getBody().eventId()).isEqualTo(eventId);
         assertThat(response.getBody().ingestTs()).isNotNull();
 
         try (KafkaConsumer<String, String> consumer = newConsumer("itest-happy-" + UUID.randomUUID())) {
@@ -82,7 +83,7 @@ class EventIngestIT {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(5));
             assertThat(records).isNotEmpty();
             var record = records.iterator().next();
-            assertThat(record.key()).isEqualTo(request.eventId().toString());
+            assertThat(record.key()).isEqualTo(eventId.toString());
 
             KafkaEventMessage message = objectMapper.readValue(record.value(), KafkaEventMessage.class);
             assertThat(message.schemaType()).isEqualTo("order-created");
@@ -92,7 +93,7 @@ class EventIngestIT {
 
     @Test
     void missingTimestamp_defaultsToIngestTime() throws Exception {
-        IngestRequest request = new IngestRequest(UUID.randomUUID(), "ping", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "ping", null, null);
         Instant before = Instant.now();
 
         ResponseEntity<IngestResponse> response = restTemplate.exchange(
@@ -106,7 +107,7 @@ class EventIngestIT {
 
     @Test
     void unauthenticatedRequest_returns401() throws Exception {
-        IngestRequest request = new IngestRequest(UUID.randomUUID(), "test", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "test", null, null);
         HttpHeaders noAuth = new HttpHeaders();
         noAuth.setContentType(MediaType.APPLICATION_JSON);
 

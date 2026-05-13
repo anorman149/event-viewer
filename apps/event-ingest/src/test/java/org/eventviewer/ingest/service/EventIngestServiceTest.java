@@ -33,25 +33,26 @@ class EventIngestServiceTest {
 
     @Test
     void ingest_delegatesToPublisher_andReturnsResponse() {
-        IngestRequest request = new IngestRequest(UUID.randomUUID(), "order-created", null, Map.of("key", "val"));
+        UUID eventId = UUID.randomUUID();
+        IngestRequest request = new IngestRequest(eventId.toString(), "order-created", null, Map.of("key", "val"));
 
         IngestResponse response = service.ingest(request);
 
-        assertThat(response.eventId()).isEqualTo(request.eventId());
+        assertThat(response.eventId()).isEqualTo(eventId);
         assertThat(response.ingestTs()).isNotNull();
         verify(kafkaEventPublisher).publish(
-                eq(request.eventId()), eq("order-created"), any(Instant.class), any(Instant.class), eq(request.payload()));
+                eq(eventId), eq("order-created"), any(Instant.class), any(Instant.class), eq(request.payload()));
     }
 
     @Test
     void ingest_whenTimestampAbsent_defaultsToIngestTime() {
         Instant before = Instant.now();
-        IngestRequest request = new IngestRequest(UUID.randomUUID(), "ping", null, null);
+        IngestRequest request = new IngestRequest(UUID.randomUUID().toString(), "ping", null, null);
 
         IngestResponse response = service.ingest(request);
 
         assertThat(response.ingestTs()).isBetween(before, before.plusSeconds(2));
         verify(kafkaEventPublisher).publish(
-                any(), any(), any(Instant.class), any(Instant.class), any());
+                any(UUID.class), any(), any(Instant.class), any(Instant.class), any());
     }
 }
