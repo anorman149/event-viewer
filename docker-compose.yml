@@ -23,12 +23,6 @@ services:
       CLUSTER_ID: ${CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qg}
     volumes:
       - kafka-data:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 15
-      start_period: 30s
 
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:

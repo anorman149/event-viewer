@@ -1,6 +1,6 @@
 # Roadmap
 
-Phases are ordered by dependency. Each phase is a self-contained, shippable increment of 4–7 tasks. Later phases may run in parallel once their dependencies are met.
+Phases are ordered by dependency. Each phase is a self-contained, shippable increment of 2–7 tasks. Later phases may run in parallel once their dependencies are met.
 
 ---
 
@@ -16,12 +16,23 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 2 — Event Ingestion Pipeline
+## Phase 2 — Kafka Ingest
 
-**Goal:** Events flow from producer through Kafka into all three stores correctly.
+**Goal:** Events arrive at the REST endpoint and land durably in Kafka. Platform-wide build standards (security, serialization, threading, fault tolerance) are established here and inherited by every subsequent phase.
 
-- [ ] Kafka topic provisioning and local producer test harness
-- [ ] REST ingest endpoint (`POST /api/v1/events`) with schema-less JSON body
+- [x] Kafka topic provisioning via Spring Kafka `@ConfigurationProperties` — each topic plus its DLT configured from `application.yml` with name, partitions, and replication factor; `KafkaAdmin` creates all topics on startup
+- [x] REST ingest endpoint (`POST /event/v1/events`) with schema-less JSON body; publishes received events to `event-raw` topic
+- [x] Jackson configuration standardized across all Spring Boot apps — `write-dates-as-timestamps: false`, `fail-on-unknown-properties: false`, `default-property-inclusion: non_null`
+- [x] Virtual threads enabled on all Spring Boot MVC apps; `@Async` and `@Scheduled` executors configured on virtual thread pools; `ContextSnapshotTaskDecorator` in `libs/common` propagates Spring Security context, MDC, and Micrometer spans into every spawned thread
+- [x] Spring OAuth2 Resource Server added to all internal apps (`event-ingest`, `event-read`, `management`, `bff`); each validates the JWT using a committed dev RSA public key; gateway validates and forwards `Authorization` header unchanged; dev RSA key pair generated for local use
+- [x] Gateway Resilience4J: `CircuitBreaker` per downstream service route + adaptive `RateLimiter` per client keyed on JWT subject or API key
+
+---
+
+## Phase 3 — Storage Consumers
+
+**Goal:** Events consumed from Kafka are persisted to all three stores and throughput is baselined.
+
 - [ ] Kafka consumer → S3 batch writer: accumulate 5,000 events, flush as ZSTD-compressed file with Hive-style key (`year=/month=/day=/hour=/schema_type=/pod=/<uuid>.zst`)
 - [ ] Kafka consumer → OpenSearch metadata index: one document per event with `s3_key`, `batch_offset`, `batch_length`, indexed metadata fields
 - [ ] Kafka consumer → PostgreSQL: write ingest audit record (batch key, event count, flush timestamp) — no raw event data
@@ -29,7 +40,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 3 — Schema Registry
+## Phase 4 — Schema Registry
 
 **Goal:** Event types are defined in PostgreSQL, versioned, and enforced at ingest.
 
@@ -42,19 +53,26 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 4 — Search & Query API
+## Phase 5 — Metadata Search
 
-**Goal:** Events are queryable with full boolean search; raw payloads are retrievable via S3 lookup.
+**Goal:** Events are queryable with full boolean search returning paginated metadata.
 
 - [ ] OpenSearch query service — full boolean search (AND / NOT / OR), keyword, time-range, and schema-type filters
-- [ ] REST search endpoint (`GET /api/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
-- [ ] Raw payload retrieval: OpenSearch lookup → `s3_key` + byte range → fetch from S3 → ZSTD decompress → return event (`GET /api/v1/events/{id}/payload`)
+- [ ] REST search endpoint (`GET /search/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
 - [ ] Pagination and cursor-based result streaming for large result sets
+
+---
+
+## Phase 6 — Payload Retrieval & API Contract
+
+**Goal:** Raw event payloads are retrievable from S3; a typed API contract is published for frontend consumers.
+
+- [ ] Raw payload retrieval: OpenSearch lookup → `s3_key` + byte range → fetch from S3 → ZSTD decompress → return event (`GET /search/v1/events/{id}/payload`)
 - [ ] OpenAPI spec published and used to generate typed TypeScript client
 
 ---
 
-## Phase 5 — Frontend Event Explorer
+## Phase 7 — Frontend Event Explorer
 
 **Goal:** Users can find and inspect any event through the UI.
 
@@ -66,7 +84,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 6 — Real-Time Event Feed
+## Phase 8 — Real-Time Event Feed
 
 **Goal:** Users see events arrive live without polling.
 
@@ -78,7 +96,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 7 — Dashboards & Visualizations
+## Phase 9 — Dashboards & Visualizations
 
 **Goal:** Users can build and save custom visual layouts.
 
@@ -90,7 +108,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 8 — Alerting & Notifications
+## Phase 10 — Alerting & Notifications
 
 **Goal:** Users are notified when event patterns meet defined thresholds.
 
@@ -102,7 +120,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 9 — Authentication & Access Control
+## Phase 11 — Authentication & Access Control
 
 **Goal:** Every action in the system is authenticated and authorized.
 
@@ -114,7 +132,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 10 — Collaboration & Export
+## Phase 12 — Collaboration & Export
 
 **Goal:** Insights are shareable and portable.
 
@@ -125,7 +143,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 11 — Data Retention & Archiving
+## Phase 13 — Data Retention & Archiving
 
 **Goal:** Old data ages out automatically per policy; nothing is silently lost.
 
@@ -137,7 +155,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 12 — Observability & Operations
+## Phase 14 — Observability & Operations
 
 **Goal:** The platform can monitor itself and support on-call engineers.
 
@@ -149,7 +167,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 13 — Resilience & Disaster Recovery
+## Phase 15 — Resilience & Disaster Recovery
 
 **Goal:** The system survives failures and can be recovered to a known state.
 
@@ -165,16 +183,18 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ```
 Phase 1 (Skeleton)
-  └─ Phase 2 (Ingest → Kafka → S3 + OpenSearch + PostgreSQL audit)
-       └─ Phase 3 (Schema Registry in PostgreSQL)
-       └─ Phase 4 (Search API: OpenSearch query + S3 payload lookup)
-            └─ Phase 5 (Explorer UI)
-            └─ Phase 6 (Live Feed)  ← also needs Phase 2
-                 └─ Phase 7 (Dashboards — OpenSearch aggregations)
-                      └─ Phase 8 (Alerting — OpenSearch + PostgreSQL rules)
-Phase 9 (Auth) ← can start after Phase 1, applied across all phases
-Phase 10 (Collaboration) ← needs Phase 7 + Phase 9
-Phase 11 (Retention) ← needs Phase 2 + Phase 3
-Phase 12 (Observability) ← can layer in at any phase
-Phase 13 (DR) ← after Phase 12
+  └─ Phase 2 (Kafka Ingest: topic + REST endpoint)
+       └─ Phase 3 (Storage Consumers: S3 + OpenSearch + PostgreSQL audit)
+            └─ Phase 4 (Schema Registry)
+            └─ Phase 5 (Metadata Search)
+                 └─ Phase 6 (Payload Retrieval & API Contract)
+                      └─ Phase 7 (Explorer UI)
+                      └─ Phase 8 (Live Feed)  ← also needs Phase 3
+                           └─ Phase 9 (Dashboards — OpenSearch aggregations)
+                                └─ Phase 10 (Alerting — OpenSearch + PostgreSQL rules)
+Phase 11 (Auth) ← can start after Phase 1, applied across all phases
+Phase 12 (Collaboration) ← needs Phase 9 + Phase 11
+Phase 13 (Retention) ← needs Phase 3 + Phase 4
+Phase 14 (Observability) ← can layer in at any phase
+Phase 15 (DR) ← after Phase 14
 ```

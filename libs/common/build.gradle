@@ -1,2 +1,9 @@
-// Stub — implemented in Phase 2.
-// The java plugin and Spring Boot BOM are applied by the root build.
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+    implementation 'org.springframework:spring-context'
+    implementation 'io.micrometer:context-propagation'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.slf4j:slf4j-api'
+}

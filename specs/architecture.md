@@ -39,8 +39,9 @@ Single entry point for all external traffic. Contains no business logic. Routes 
 | Responsibility | Implementation |
 |---|---|
 | Routing | `/event/v1/**` → event-ingest · `/search/v1/**` → event-read · `/api/v1/**` → management · `/bff/v1/**` → bff |
-| Authentication | JWT validation filter (verify token signature + expiry; reject 401 before downstream) |
-| Rate limiting | In-memory token bucket per API key (Redis-backed in production) |
+| Authentication | JWT validation filter (verify token signature + expiry; reject 401 before downstream); forwards `Authorization: Bearer` header unchanged to all downstream services so each can independently re-validate |
+| Rate limiting | Adaptive token bucket per client keyed on JWT subject or API key; backed by Resilience4J `RateLimiter` (in-memory; Redis-backed in production) |
+| Circuit breaker | Resilience4J `CircuitBreaker` per downstream service route; opens on consecutive failures; returns `503` to the caller while open to prevent cascade failures |
 | Observability | Request/response logging filter (correlation ID injected into `X-Correlation-ID` header + MDC) |
 | TLS termination | Handled at gateway; downstream services communicate over plain HTTP inside the cluster |
 
@@ -78,6 +79,8 @@ POST /event/v1/events
 
 **Scaling:** Each pod is assigned a subset of Kafka partitions. Each pod writes to its own S3 key prefix (`pod=<k8s-pod-name>/`) — no write coordination needed.
 
+**Security:** Spring OAuth2 Resource Server; validates JWT signature and expiry on every inbound request using the platform RSA public key; rejects unauthenticated calls with `401` regardless of whether the request arrived via the gateway.
+
 **Depends on libs:** `event-api`, `s3-lib`, `opensearch-lib`, `common`
 
 ---
@@ -97,6 +100,8 @@ Owns the full read path: boolean search over OpenSearch metadata, and raw payloa
 
 **Why read and write are separate apps:** Independent scaling (event-ingest scales on Kafka partition count; event-read scales on query concurrency), independent deployment, and clean separation of the OpenSearch indexing surface from the query surface.
 
+**Security:** Spring OAuth2 Resource Server; validates JWT on every inbound request using the platform RSA public key; rejects unauthenticated calls with `401`.
+
 **Depends on libs:** `event-api`, `s3-lib`, `opensearch-lib`, `common`
 
 ---
@@ -114,6 +119,8 @@ Owns all CRUD management of system concepts. This is the only app that writes to
 | Alert rules | `GET/POST/PUT/DELETE /api/v1/alerts` | Threshold, time window, schema filter, notification channels |
 | Users & RBAC | `GET/POST/PUT/DELETE /api/v1/users` | Accounts, role assignments |
 | API keys | `POST/DELETE /api/v1/api-keys` | Hashed, scoped ingest keys |
+
+**Security:** Spring OAuth2 Resource Server; validates JWT on every inbound request using the platform RSA public key; rejects unauthenticated calls with `401`.
 
 **Depends on libs:** `event-api`, `common`
 
@@ -133,6 +140,8 @@ The exclusive backend entry point for the React frontend. The browser never call
 | Fan-out | Parallel reactive calls to multiple services (WebFlux `Mono.zip` / `Flux.merge`) |
 
 **Internal routing:** The BFF calls other services via internal cluster DNS (`http://event-read`, `http://management`, `http://event-ingest`) — it does **not** loop back through the gateway.
+
+**Security:** Spring OAuth2 Resource Server; validates JWT on every inbound request. For outbound service-to-service calls the BFF forwards the JWT from the originating request in the downstream `Authorization` header.
 
 **Depends on libs:** `event-api`, `common`
 
@@ -217,6 +226,84 @@ Libraries have no `main` class. They are imported as Gradle dependencies by apps
 
 **Write volume:** 1M events/sec inbound → ~200 S3 + OpenSearch write ops/sec (5,000-event batches)
 **Read volume:** 1,000–10,000 RPS across event-read + bff + management
+
+---
+
+## Platform Standards
+
+These conventions apply to every `apps/*` Spring Boot application and must not be regressed in any subsequent phase.
+
+### Internal Service Security Model
+
+The gateway is **not** the sole auth boundary. Every internal service independently validates the JWT on every inbound request.
+
+```
+Client → Gateway (validate JWT + forward Authorization header)
+                 → event-ingest  (re-validate JWT)
+                 → event-read    (re-validate JWT)
+                 → management    (re-validate JWT)
+                 → bff           (re-validate JWT → forward to downstream)
+```
+
+Each service configures `spring-boot-starter-oauth2-resource-server` with the platform RSA public key:
+
+```yaml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          public-key-location: classpath:keys/local-public.pem
+```
+
+The public key (`platform-public.pem`) is committed to `src/main/resources/keys/` in each app. The corresponding private key is never committed; it lives in `docker-compose.env` (gitignored) for local dev JWT generation and in a secrets manager in production.
+
+**Why not trust the gateway:** If a gateway misconfiguration, a compromised internal pod, or a misconfigured load balancer routes traffic directly to an internal service, that service must still enforce auth. Defense in depth.
+
+**Production complement:** K8s `NetworkPolicy` restricts which pods can reach which services at the network layer. Istio mTLS adds mutual certificate authentication between sidecars. JWT validation remains the primary application-layer control; mTLS is the network-layer second line of defense.
+
+### Virtual Threads & Async Execution
+
+All Spring Boot MVC apps enable virtual threads:
+
+```yaml
+spring:
+  threads:
+    virtual:
+      enabled: true
+```
+
+`@Async` executors and `@Scheduled` task schedulers are configured to use virtual thread pools. No application code creates `new Thread(...)` directly — all task submission goes through Spring's executor abstractions so context propagation wiring applies uniformly.
+
+For `apps/bff` (WebFlux): WebFlux already uses a non-blocking event loop; virtual threads do not apply to the reactive pipeline. Context propagation uses Reactor's `Context` API and `ContextPropagation.resetAll()`.
+
+### Context Propagation
+
+Every thread — web request, `@Async` task, or `@Scheduled` job — carries its full execution context:
+
+| Context | Propagation mechanism |
+|---|---|
+| Spring Security principal | `DelegatingSecurityContextExecutor` wrapping the virtual thread executor |
+| MDC (correlation ID, trace ID) | Logback `MDC`; copied via `ContextSnapshotTaskDecorator` on `@Async` executors |
+| Micrometer Tracing (spans) | `ObservationThreadLocalAccessor` registered in `ContextRegistry`; propagates automatically via Micrometer's `ContextSnapshot` integration in Spring Boot 3.2+ |
+
+A shared `ContextSnapshotTaskDecorator` bean in `libs/common` wraps all three. `@Async` executor beans in each app apply this decorator. Spring Boot's auto-configuration for Micrometer handles observation propagation; Security and MDC require the decorator.
+
+### Jackson Configuration
+
+All Spring Boot apps configure Jackson identically via `application.yml`:
+
+```yaml
+spring:
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+```
+
+`write-dates-as-timestamps: false` ensures all `Instant` / `LocalDate` fields serialize as ISO-8601 strings. `fail-on-unknown-properties: false` prevents deserialization failures when services receive responses with fields added in newer versions. `non_null` suppresses null fields in responses.
 
 ---
 

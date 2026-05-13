@@ -1,6 +1,7 @@
 plugins {
     id 'org.springframework.boot' version '3.4.5' apply false
     id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'com.avast.gradle.docker-compose' version '0.17.12'
 }
 
 allprojects {
@@ -35,5 +36,47 @@ subprojects {
 
     test {
         useJUnitPlatform()
+        jvmArgs '-Dnet.bytebuddy.experimental=true'
+    }
+}
+
+dockerCompose {
+    projectName = 'event-viewer-test-services'
+    useComposeFiles = ['docker-compose-test.yml']
+    waitForTcpPorts = false
+}
+
+configure(subprojects.findAll { it.path.startsWith(':apps:') }) {
+    sourceSets {
+        itest {
+            java.srcDir 'src/itest/java'
+            resources.srcDir 'src/itest/resources'
+            compileClasspath += sourceSets.test.compileClasspath
+            runtimeClasspath += sourceSets.test.runtimeClasspath
+        }
+    }
+
+    configurations {
+        itestImplementation.extendsFrom testImplementation
+        itestRuntimeOnly.extendsFrom testRuntimeOnly
+    }
+
+    tasks.register('itest', Test) {
+        description = 'Runs integration tests against live Docker Compose services.'
+        group = 'verification'
+        testClassesDirs = sourceSets.itest.output.classesDirs
+        classpath = sourceSets.itest.runtimeClasspath
+        shouldRunAfter test
+        jvmArgs '-Dnet.bytebuddy.experimental=true'
+        useJUnitPlatform()
+    }
+
+    check.dependsOn itest
+
+    afterEvaluate {
+        def itestTask = tasks.findByName('itest')
+        if (itestTask) {
+            rootProject.dockerCompose.isRequiredBy(itestTask)
+        }
     }
 }
