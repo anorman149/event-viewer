@@ -11,13 +11,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
-@EnableConfigurationProperties(KafkaTopicProperties.class)
+@EnableConfigurationProperties(KafkaProperties.class)
 public class KafkaTopicConfig {
 
     @Bean
-    public KafkaAdmin.NewTopics allTopics(KafkaTopicProperties properties) {
+    public KafkaAdmin.NewTopics allTopics(KafkaProperties properties) {
         List<NewTopic> topics = new ArrayList<>();
-        for (KafkaTopicProperties.TopicDefinition def : properties.topics()) {
+        for (KafkaProperties.TopicDefinition def : properties.topics()) {
             topics.add(TopicBuilder.name(def.name())
                     .partitions(def.partitions())
                     .replicas(def.replicationFactor())

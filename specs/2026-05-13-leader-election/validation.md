@@ -4,101 +4,100 @@ A phase is complete and mergeable when every criterion below passes. Work throug
 
 ---
 
-## Group 1 — New Library Module & Properties
+## Group 1 — Redis Infrastructure
 
 | # | Check | How to verify |
 |---|---|---|
-| 1.1 | `libs/leader` module declared in `settings.gradle` | `./gradlew :libs:leader:build` — no "project not found" error |
-| 1.2 | `libs/leader` compiles with `client-java` added | `./gradlew :libs:leader:build` — no compilation errors |
-| 1.3 | `LeaderElectionProperties` binds correctly from YAML | `LeaderElectionPropertiesTest` passes; all fields bound from test YAML fixture |
-| 1.4 | Cross-field validation rejects `renewDeadline >= leaseDuration` | `LeaderElectionPropertiesTest` includes a case with invalid timing — expects `ConstraintViolationException` |
-| 1.5 | No dependency version conflicts | `./gradlew :libs:leader:dependencies --configuration runtimeClasspath` — inspect for `client-java` transitive conflicts; resolve any shown as `*` |
-| 1.6 | `libs/common` build is unaffected | `./gradlew :libs:common:build` still passes with no new dependencies |
+| 1.1 | Redis service present in `docker-compose.yml` with healthcheck | `docker compose config` — `redis` service appears; `healthcheck.test` contains `redis-cli ping` |
+| 1.2 | Redis service present in `docker-compose-test.yml` | Same check on test compose file |
+| 1.3 | Redis starts and responds to PING | `docker compose up redis -d && docker compose exec redis redis-cli ping` → `PONG` |
+| 1.4 | `spring.data.redis.*` properties present in `application.yml` | Manual review — `host`, `port`, `password` (env-var substituted) present |
+| 1.5 | No Redis data volume in either compose file | Manual review — leader election state must be ephemeral; no named volume for Redis |
 
 ---
 
-## Group 2 — `LeaderElectionService`
+## Group 2 — `libs/leader` Module & Properties
 
 | # | Check | How to verify |
 |---|---|---|
-| 2.1 | `KubernetesLeaderElectionServiceTest` passes | `./gradlew :libs:leader:test` — all tests green |
-| 2.2 | `StandaloneLeaderElectionServiceTest` passes | Same command; verify `isLeader()` returns `true` and `LeaderElectedEvent` is published on startup |
-| 2.3 | `LeaderElectionAutoConfiguration` wires `Standalone` when `enabled=false` | Integration test with `enabled=false` — assert `LeaderElectionService` bean present and `isLeader()` returns `true` |
-| 2.4 | `LeaderElectionAutoConfiguration` wires `Kubernetes` when `enabled=true` | Integration test with `enabled=true` and mocked `LeaderElector` — assert `KubernetesLeaderElectionService` is the registered bean |
-| 2.5 | Graceful shutdown releases lease | `KubernetesLeaderElectionServiceTest` — call `destroy()`, verify mock `LeaderElector` receives release signal |
+| 2.1 | `libs/leader` module declared in `settings.gradle` | `./gradlew :libs:leader:build` — no "project not found" error |
+| 2.2 | `libs/leader` compiles with Redisson dependency | `./gradlew :libs:leader:build` — no compilation errors |
+| 2.3 | `RedisLeaderElectionPropertiesTest` passes | `./gradlew :libs:leader:test` — all binding and validation cases green |
+| 2.4 | Cross-field validation rejects `lockWatchdogTimeoutMs <= retryIntervalMs` | Test case with invalid values expects `ConstraintViolationException` |
+| 2.5 | No dependency version conflicts | `./gradlew :libs:leader:dependencies --configuration runtimeClasspath` — no `*` conflicts for Redisson or Netty |
+| 2.6 | `libs/common` build is unaffected | `./gradlew :libs:common:build` still passes with no new dependencies |
+| 2.7 | `LeaderTask` is a `@FunctionalInterface` with `throws Exception` | Code review — annotation present; method signature matches `void execute() throws Exception` |
+| 2.8 | `LeaderListener` interface has both `onLeader(long)` and `onLeaderLoss(long)` | Code review — both methods present with the correct `long fencingToken` parameter |
 
 ---
 
-## Group 3 — `LeaderAwareScheduler`
+## Group 3 — `RedissonLeaderElectionService`
 
 | # | Check | How to verify |
 |---|---|---|
-| 3.1 | Task runs exactly once when `isLeader()` is `true` | `LeaderAwareSchedulerTest` — verify runnable called exactly once |
-| 3.2 | Task is skipped and counter incremented when `isLeader()` is `false` | `LeaderAwareSchedulerTest` — verify runnable never called; `leader_aware_scheduler.skipped_total` counter = 1 |
-| 3.3 | Exception in task does not crash the scheduler or propagate to caller | `LeaderAwareSchedulerTest` — task throws `RuntimeException`; assert no exception escapes `runIfLeader()`; assert counter not incremented (task ran, it just failed) |
-| 3.4 | `@Timed` metric registered | Verify `leader_aware_scheduler.execution` appears in a `SimpleMeterRegistry` in the test |
+| 3.1 | `isLeader()` and `getFencingToken()` make no Redis call | Code review — both methods read local `volatile` fields only; no `RedissonClient` or `RLock` reference inside |
+| 3.2 | `tryLock` returns `false` → no listener notified | Unit test: mock `tryLock` → `false`; assert `onLeader()` never called on test listener; assert `isLeader()` = `false`; assert `getFencingToken()` = -1L |
+| 3.3 | `tryLock` returns `true` → acquisition recorded | Unit test: `onLeader(token)` called on all injected listeners; `isLeader()` = `true`; `getFencingToken()` = mocked `incrementAndGet()` value |
+| 3.4 | `isHeldByCurrentThread()` → false (not shutting down) → loss recorded | Unit test: `onLeaderLoss(token)` called; `isLeader()` = `false`; `getFencingToken()` = -1L; connection-losses counter = 1 |
+| 3.5 | `destroy()` when leader → lock released; listeners notified | Unit test: verify `lock.unlock()` called; `onLeaderLoss(token)` called on all listeners; relinquishments counter = 1 |
+| 3.6 | `destroy()` when not leader → no unlock; no listeners notified | Unit test: `lock.unlock()` never called; no listener call recorded |
+| 3.7 | `startElectionLoop()` returns immediately (does not block bootstrapping) | Unit test: call `startElectionLoop()` with `tryLock` blocking indefinitely; assert method returns within 50 ms |
+| 3.8 | Election loop retries after failed acquisition | Unit test: `tryLock` → `false` three times → `true`; assert `onLeader()` eventually called |
+| 3.9 | Fencing token monotonically increases across acquisitions | Unit test: simulate acquisition, loss, re-acquisition; assert second `onLeader()` token > first token |
+| 3.10 | All unit tests in `RedissonLeaderElectionServiceTest` pass | `./gradlew :libs:leader:test` — green |
 
 ---
 
-## Group 4 — `KafkaLagMonitor`
+## Group 4 — `LeaderAwareScheduler`
 
 | # | Check | How to verify |
 |---|---|---|
-| 4.1 | `KafkaLagMonitorTest` passes | `./gradlew :apps:event-ingest:test` — all tests green |
-| 4.2 | No `AdminClient` calls when `isLeader()` is `false` | Mock `AdminClient` in test; set leader = false; trigger scheduled method manually; verify zero interactions on mock |
-| 4.3 | One gauge registered per (group, topic, partition) tuple | Set leader = true; mock `AdminClient` to return 2 partitions for 1 topic; assert 2 gauges in `MeterRegistry` |
-| 4.4 | Gauge upsert — second invocation updates value, does not register a new gauge | Call monitor twice with different lag values; assert `meterRegistry.find("kafka.consumer.lag")` returns exactly 2 gauges (not 4) |
-| 4.5 | Default interval is 60 s | `KafkaLagMonitorProperties` default binding test asserts `intervalMs == 60000` |
-| 4.6 | Application starts without error with `kafka.lag-monitor.enabled=true` | `./gradlew :apps:event-ingest:itest` — `KafkaLagMonitorIT` starts context (interval overridden to 500 ms via `@TestPropertySource`) and asserts gauge exists in `/actuator/prometheus` |
+| 4.1 | Task runs when leader; exception propagates to caller | `LeaderAwareSchedulerTest` — `LeaderTask` throws `IOException`; assert `IOException` propagates from `runIfLeader()` |
+| 4.2 | `RuntimeException` from task propagates | Same pattern with `IllegalStateException` |
+| 4.3 | Task result is returned with no interference | Task completes normally when leader; assert no exception escapes |
+| 4.4 | `leader.aware.scheduler.skipped` counter = 1 when not leader | Not-leader case: counter = 1; task `execute()` never called |
+| 4.5 | `leader.aware.scheduler.execution` timer registered | Timer appears in `SimpleMeterRegistry` after a leader execution |
 
 ---
 
-## Group 5 — Observability Meters
+## Group 5 — `KafkaLagMonitor`
+
+Validity is determined by correct behavior (AdminClient calls, lag computation), not by metric assertions — see Rules.md.
 
 | # | Check | How to verify |
 |---|---|---|
-| 5.1 | `leader_election_is_leader` gauge present in Prometheus output | `LeaderElectionIT` (standalone mode) — `GET /actuator/prometheus` body contains `leader_election_is_leader` with value `1.0` |
-| 5.2 | `leader_election_acquisitions_total` counter = 1 after startup in standalone mode | Same IT — Prometheus output contains `leader_election_acquisitions_total 1.0` |
-| 5.3 | `kafka.consumer.lag` gauge present after one monitor interval | `KafkaLagMonitorIT` — gauge appears in Prometheus output after first scheduled firing |
-| 5.4 | All metric names follow platform naming convention | Manual review: snake_case; no spaces; no camelCase |
+| 5.1 | No `AdminClient` calls when not leader | `KafkaLagMonitorTest` — mock `AdminClient`; `isLeader()` = `false`; trigger scheduled method; zero interactions on mock |
+| 5.2 | `listConsumerGroupOffsets()` called with correct group ID when leader | `isLeader()` = `true`; assert `adminClient.listConsumerGroupOffsets("event-ingest-group")` called |
+| 5.3 | `listOffsets()` called with the partitions returned by `listConsumerGroupOffsets()` | Assert partitions in `listOffsets()` call match those returned from group offset listing |
+| 5.4 | Lag computation is correct | Given latestOffset=100, committedOffset=90; assert gauge is registered with value 10 for that (group, topic, partition) |
+| 5.5 | Default `intervalMs` is 60 s | Properties default binding test asserts `intervalMs == 60000` |
+| 5.6 | All `KafkaLagMonitorTest` cases pass | `./gradlew :apps:event-ingest:test` — green |
 
 ---
 
-## Group 6 — K8s Manifests
+## Group 6 — Integration Tests
+
+Tests assert deterministic behavior through service methods and mock interactions — not through `/actuator/prometheus` or metric endpoint responses (see Rules.md).
 
 | # | Check | How to verify |
 |---|---|---|
-| 6.1 | RBAC manifest is valid YAML | `kubectl apply --dry-run=client -f infra/k8s/leader-election-rbac.yaml` — no errors |
-| 6.2 | Deployment manifest is valid YAML | `kubectl apply --dry-run=client -f infra/k8s/event-ingest-deployment.yaml` — no errors |
-| 6.3 | `MY_POD_NAME` env var is downward API reference (not hardcoded) | Manual review — must use `fieldRef.fieldPath: metadata.name` |
-| 6.4 | `serviceAccountName` references the account defined in RBAC manifest | Manual review — names must match exactly |
-| 6.5 | No sensitive values committed | Manual review — no passwords, tokens, or keys in `infra/` |
+| 6.1 | `LeaderElectionIT` — service acquires leadership | `leaderElectionService.isLeader()` returns `true` within startup timeout |
+| 6.2 | `LeaderElectionIT` — fencing token is positive | `leaderElectionService.getFencingToken() > 0` |
+| 6.3 | `LeaderElectionIT` — listener notified on startup | Test `LeaderListener` bean's `onLeader()` called exactly once; `lastFencingToken()` matches `getFencingToken()` |
+| 6.4 | `KafkaLagMonitorIT` — `AdminClient` was called | `adminClientSpy.listConsumerGroupOffsetsInvocationCount() >= 1` after overridden 500 ms interval fires |
+| 6.5 | `LeaderElectionConnectionIT` — re-acquisition after simulated failure | After first `tryLock` throws `RedisConnectionException`, retry succeeds; `isLeader()` becomes `true` within 3 × `retryIntervalMs`; `getFencingToken() > 0` |
+| 6.6 | All three IT classes pass | `./gradlew :apps:event-ingest:itest` — green |
 
 ---
 
-## Group 7 — Local K8s Deployment Test (Manual)
-
-Performed once before merge; not required in CI.
-
-| # | Check | Steps |
-|---|---|---|
-| 7.1 | Single leader acquired | `kubectl apply -f infra/k8s/`; wait 30 s; `kubectl logs -l app=event-ingest --all-containers` — exactly one pod logs `"acquired leadership"` |
-| 7.2 | Follower state logged | Second pod logs confirm follower state (no acquired leadership message) |
-| 7.3 | Leader metrics on leader pod | `kubectl port-forward <leader-pod> 8080:8080`; `curl localhost:8080/actuator/prometheus` — `leader_election_is_leader 1.0` |
-| 7.4 | Follower metrics on follower pod | Port-forward follower pod — `leader_election_is_leader 0.0` |
-| 7.5 | Leadership transfers after pod kill | `kubectl delete pod <leader-pod>`; within `leaseDurationSeconds` (15 s) the remaining pod logs `"acquired leadership"`; `leader_election_acquisitions_total` counter increments on the new leader |
-| 7.6 | Lag monitor runs only on leader | After leadership transfer, `kafka.consumer.lag` gauge updates only occur on the new leader pod |
-
----
-
-## Group 8 — CI & Build
+## Group 7 — CI & Build
 
 | # | Check | How to verify |
 |---|---|---|
-| 8.1 | `./gradlew test` passes on all modules including `libs/leader` | CI `backend-unit` job green |
-| 8.2 | `./gradlew :apps:event-ingest:itest` passes | CI `backend-itest` job green |
-| 8.3 | No ByteBuddy errors on Java 25 for `libs/leader` | `jvmArgs '-Dnet.bytebuddy.experimental=true'` confirmed in root `build.gradle` for all subprojects |
-| 8.4 | No new compiler warnings introduced | `./gradlew build --warning-mode all` — review output for new warnings |
+| 7.1 | `./gradlew test` passes all modules including `libs/leader` | CI `backend-unit` job green |
+| 7.2 | `./gradlew :apps:event-ingest:itest` passes | CI `backend-itest` job green (Redis available in CI environment) |
+| 7.3 | No ByteBuddy errors on Java 25 for `libs/leader` | `jvmArgs '-Dnet.bytebuddy.experimental=true'` confirmed in root `build.gradle` for all subprojects |
+| 7.4 | No new compiler warnings | `./gradlew build --warning-mode all` — no new warnings |
 
 ---
 
@@ -106,10 +105,11 @@ Performed once before merge; not required in CI.
 
 - [ ] All unit tests in `libs/leader` pass
 - [ ] All unit tests in `apps/event-ingest` pass
-- [ ] `LeaderElectionIT` and `KafkaLagMonitorIT` in `apps/event-ingest/src/itest` pass
-- [ ] K8s manifests pass `kubectl --dry-run` validation
-- [ ] Local K8s deployment test (Groups 7.1–7.6) completed and all checks pass
-- [ ] `leader_election_is_leader`, `leader_election_acquisitions_total`, `leader_election_relinquishments_total`, and `kafka.consumer.lag` visible in `/actuator/prometheus`
-- [ ] `libs/common` build is unaffected (no new dependencies added to it)
+- [ ] `LeaderElectionIT`, `KafkaLagMonitorIT`, `LeaderElectionConnectionIT` all pass
+- [ ] Redis service present and healthy in both `docker-compose.yml` and `docker-compose-test.yml`
+- [ ] `leaderElectionService.isLeader()` returns `true` and `getFencingToken() > 0` confirmed in `LeaderElectionIT`
+- [ ] `TestLeaderListener.onLeader()` call confirmed in `LeaderElectionIT`
+- [ ] `libs/common` build is unaffected (no new dependencies)
 - [ ] `./gradlew build` passes end-to-end with no errors
 - [ ] No secrets or credentials committed
+- [ ] No test assertions use `/actuator/prometheus`, `/actuator/metrics`, or Prometheus text output (see Rules.md)

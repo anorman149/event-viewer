@@ -41,7 +41,7 @@ subprojects {
 }
 
 dockerCompose {
-    projectName = 'event-viewer-test-services'
+    projectName = 'event-viewer-test'
     useComposeFiles = ['docker-compose-test.yml']
     waitForTcpPorts = false
 }

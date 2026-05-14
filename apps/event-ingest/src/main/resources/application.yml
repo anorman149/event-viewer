@@ -55,6 +55,14 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level %magenta([${spring.application.name},%X{traceId:-},%X{spanId:-}]) %cyan(%logger{36}) - %msg%n"
 
+leader-election:
+  lock-name: leader:event-ingest
+  retry-interval-ms: 2000
+  lock-watchdog-timeout-ms: 30000
+  clustered: true
+  host: redis://localhost:6379
+  password: placeholder
+
 event-ingest:
   kafka:
     topics:
@@ -65,3 +73,8 @@ event-ingest:
           name: event-raw-dlt
           partitions: 1
           replication-factor: 1
+    lag-monitor:
+      enabled: true
+      interval-ms: 60000
+      consumer-group-ids:
+        - event-ingest-group
