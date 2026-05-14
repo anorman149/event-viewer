@@ -33,14 +33,14 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** Distributed leadership coordination ensures that exactly one pod runs scheduled tasks at any time. All future phases that require a singleton scheduler (lag monitoring, rule-cache refresh, retention jobs) depend on this infrastructure.
 
-- [ ] Redis added to `docker-compose.yml` and `docker-compose-test.yml` (standalone, ephemeral — no named volume); Redis is always required; no always-leader fallback mode
-- [ ] `libs/leader` library — Redisson `RLock` with watchdog-managed TTL; `RedissonLeaderElectionService` submits the election loop to a single-thread executor at startup (bootstrapping returns immediately); exposes `isLeader()` and `getFencingToken()` as locally-cached reads (no Redis call)
-- [ ] Fencing token — `RAtomicLong` in Redis incremented on each lock acquisition; exposed via `getFencingToken()`; protected operations compare the token before committing writes to guard against zombie leaders
-- [ ] `LeaderListener` interface — beans implementing `LeaderListener` are auto-discovered via Spring `List<LeaderListener>` injection; notified with `onLeader(fencingToken)` / `onLeaderLoss(fencingToken)` on state transitions; no Spring `ApplicationEventPublisher` used
-- [ ] Failure-mode protections — graceful shutdown explicitly releases the lock and notifies listeners (immediate handoff); JVM kill lets watchdog TTL expire (default 30 s); network partition detected via `isHeldByCurrentThread()` monitoring; all failure paths notify listeners
-- [ ] `LeaderAwareScheduler` — `runIfLeader(LeaderTask task) throws Exception`; executes task only when leader; propagates all exceptions; no-op on followers
-- [ ] `KafkaLagMonitor` in `apps/event-ingest` — `@Scheduled` bean (interval: 60 s); runs via `LeaderAwareScheduler`; queries Kafka `AdminClient` for consumer group lag; emits `kafka.consumer.lag` gauge per (topic, partition, consumer-group) tuple
-- [ ] Observability — dot-notation Micrometer metrics: `leader.election.acquisitions`, `leader.election.relinquishments`, `leader.election.connection.losses`, `leader.election.is.leader`, `leader.election.fencing.token`, `kafka.consumer.lag` per partition
+- [x] Redis added to `docker-compose.yml` and `docker-compose-test.yml` (standalone, ephemeral — no named volume); Redis is always required; no always-leader fallback mode
+- [x] `libs/leader` library — Redisson `RLock` with watchdog-managed TTL; `RedissonLeaderElectionService` submits the election loop to a single-thread executor at startup (bootstrapping returns immediately); exposes `isLeader()` and `getFencingToken()` as locally-cached reads (no Redis call)
+- [x] Fencing token — `RAtomicLong` in Redis incremented on each lock acquisition; exposed via `getFencingToken()`; protected operations compare the token before committing writes to guard against zombie leaders
+- [x] `LeaderListener` interface — beans implementing `LeaderListener` are auto-discovered via Spring `List<LeaderListener>` injection; notified with `onLeader()` / `onLeaderLoss()` on state transitions; fencing token accessible via `LeaderElectionService.getFencingToken()`; no Spring `ApplicationEventPublisher` used
+- [x] Failure-mode protections — graceful shutdown explicitly releases the lock and notifies listeners (immediate handoff); JVM kill lets watchdog TTL expire (default 30 s); network partition detected via `isHeldByCurrentThread()` monitoring; all failure paths notify listeners
+- [x] `LeaderAwareScheduler` — `runIfLeader(LeaderTask task) throws Exception`; executes task only when leader; propagates all exceptions; no-op on followers
+- [x] `KafkaLagMonitor` in `apps/event-ingest` — `@Scheduled` bean (interval: 60 s); runs via `LeaderAwareScheduler`; queries Kafka `AdminClient` for consumer group lag; emits `kafka.consumer.lag` gauge per (topic, partition, consumer-group) tuple
+- [x] Observability — dot-notation Micrometer metrics: `leader.election.acquisitions`, `leader.election.relinquishments`, `leader.election.connection.losses`, `leader.election.is.leader`, `leader.election.fencing.token`, `kafka.consumer.lag` per partition
 
 ---
 
