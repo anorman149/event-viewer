@@ -48,14 +48,14 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** Events are consumed from 4 sharded topics with production-grade configuration: dynamic listeners from properties (no `@KafkaListener`), static membership for pod-restart resilience, cooperative sticky rebalancing, manual batch acknowledgment, SASL security, and a full retry → DLT pipeline. Parse failures are metered and skipped — DLT stays clean.
 
-- [ ] Topic topology — 4 topics (`event-raw-1` … `event-raw-4`), 80 partitions × 1 replica (prod); 2 partitions (local); DLT topics provisioned automatically at `{topic}.DLT`; all topics created via `KafkaAdmin` from `EventConsumerProperties`
-- [ ] Dynamic container creation — one `ConcurrentMessageListenerContainer` per topic, created programmatically from properties in `EventConsumerContainerFactory` (implements `SmartLifecycle`); no `@KafkaListener` annotations; concurrency configurable (default 20 prod, 1 local)
-- [ ] Consumer settings — `CooperativeStickyAssignor`, `group.instance.id = {MY_POD_NAME}-{topic}-{threadIndex}` for static membership, `AckMode.MANUAL_IMMEDIATE`, `BatchAcknowledgingMessageListener` (both main and DLT); concurrency computed at runtime via `computeConcurrency(partitionsPerTopic, INGEST_POD_COUNT_env)`; virtual thread executor per container; `session.timeout.ms=45000`, `max.poll.interval.ms=300000`, `max.poll.records=500`, `heartbeat.interval.ms=3000`, fetch settings tuned for 50 MB/request
-- [ ] SASL/SCRAM-SHA-512 — plaintext in dev; `security.protocol=SASL_SSL` in prod; `sasl.jaas.config` injected via `KAFKA_SASL_JAAS_CONFIG` env var; never committed
-- [ ] `EventBatchListener` — per-record parse: `JsonProcessingException` caught, metered (`kafka.consumer.parse.failures`), skipped; valid records forwarded to `IngestPipelineService.process()` stub; `acknowledge()` called once per batch regardless
-- [ ] `DefaultErrorHandler` — 3-attempt exponential backoff (1 s → 2 s → 4 s); `DeadLetterPublishingRecoverer` routes to `{topic}.DLT`; `JsonProcessingException` is non-retryable
-- [ ] `DltConsumerContainerFactory` — one DLT container per topic (concurrency = 1, group `event-ingest-dlt-group`); `DltBatchMessageListener` retries up to 100 times (5 s fixed); `dlt.recovered` / `dlt.exhausted` counters
-- [ ] Kafka lag metrics from Phase 3 `KafkaLagMonitor` registered for both `event-ingest-group` and `event-ingest-dlt-group`
+- [x] Topic topology — 4 topics (`event-raw-1` … `event-raw-4`), 80 partitions × 1 replica (prod); 2 partitions (local); DLT topics provisioned automatically at `{topic}.DLT`; all topics created via `KafkaAdmin` from `EventConsumerProperties`
+- [x] Dynamic container creation — one `ConcurrentMessageListenerContainer` per topic, created programmatically from properties in `EventConsumerContainerFactory` (implements `SmartLifecycle`); no `@KafkaListener` annotations; concurrency configurable (default 20 prod, 1 local)
+- [x] Consumer settings — `CooperativeStickyAssignor`, `group.instance.id = {MY_POD_NAME}-{topic}-{threadIndex}` for static membership, `AckMode.MANUAL_IMMEDIATE`, `BatchAcknowledgingMessageListener` (both main and DLT); concurrency computed at runtime via `computeConcurrency(partitionsPerTopic, INGEST_POD_COUNT_env)`; virtual thread executor per container; `session.timeout.ms=45000`, `max.poll.interval.ms=300000`, `max.poll.records=500`, `heartbeat.interval.ms=3000`, fetch settings tuned for 50 MB/request
+- [x] SASL/SCRAM-SHA-512 — plaintext in dev; `security.protocol=SASL_SSL` in prod; `sasl.jaas.config` injected via `KAFKA_SASL_JAAS_CONFIG` env var; never committed
+- [x] `EventBatchListener` — per-record parse: `JsonProcessingException` caught, metered (`kafka.consumer.parse.failures`), skipped; valid records forwarded to `IngestPipelineService.process()` stub; `acknowledge()` called once per batch regardless
+- [x] `DefaultErrorHandler` — 3-attempt exponential backoff (1 s → 2 s → 4 s); `DeadLetterPublishingRecoverer` routes to `{topic}.DLT`; `JsonProcessingException` is non-retryable
+- [x] `DltConsumerContainerFactory` — one DLT container per topic (concurrency = 1, group `event-ingest-dlt-group`); `DltBatchMessageListener` retries up to 100 times (5 s fixed); `dlt.recovered` / `dlt.exhausted` counters
+- [x] Kafka lag metrics from Phase 3 `KafkaLagMonitor` registered for both `event-ingest-group` and `event-ingest-dlt-group`
 
 ---
 
