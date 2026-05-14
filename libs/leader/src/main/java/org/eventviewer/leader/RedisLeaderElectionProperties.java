@@ -1,24 +1,13 @@
 package org.eventviewer.leader;
 
-import jakarta.validation.constraints.AssertTrue;
-import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.validation.annotation.Validated;
 
 @ConfigurationProperties(prefix = "leader-election")
-@Validated
 public class RedisLeaderElectionProperties {
-
     private String lockName = "leader:event-ingest";
-
-    @Min(500)
     private long retryIntervalMs = 2000L;
-
-    @Min(5000)
     private long lockWatchdogTimeoutMs = 30000L;
-
     private boolean clustered = false;
-
     private String host = "localhost";
 
     public String getPassword() {
@@ -31,7 +20,6 @@ public class RedisLeaderElectionProperties {
 
     private String password;
 
-    @AssertTrue(message = "leader-election.lock-watchdog-timeout-ms must be greater than leader-election.retry-interval-ms")
     public boolean isWatchdogTimeoutGreaterThanRetryInterval() {
         return lockWatchdogTimeoutMs > retryIntervalMs;
     }

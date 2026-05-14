@@ -1,0 +1,7 @@
+logging:
+  level:
+    root: info
+    org.eventviewer: debug
+
+leader-election:
+  clustered: false
