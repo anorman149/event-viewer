@@ -5,3 +5,13 @@ logging:
 
 leader-election:
   clustered: false
+  # Unique lock name per test context so concurrent Spring contexts don't compete for the same Redis lock.
+  lock-name: leader:event-ingest-${random.uuid}
+
+spring:
+  kafka:
+    security:
+      protocol: PLAINTEXT
+    admin:
+      security:
+        protocol: PLAINTEXT

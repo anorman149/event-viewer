@@ -5,3 +5,11 @@ logging:
 
 leader-election:
   clustered: false
+
+spring:
+  kafka:
+    security:
+      protocol: PLAINTEXT
+    admin:
+      security:
+        protocol: PLAINTEXT

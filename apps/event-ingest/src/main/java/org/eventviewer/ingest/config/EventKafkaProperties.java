@@ -5,9 +5,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.util.List;
 
 @ConfigurationProperties(prefix = "event-ingest.kafka")
-public record KafkaProperties(List<TopicDefinition> topics, LagMonitor lagMonitor) {
+public record EventKafkaProperties(List<TopicDefinition> topics, LagMonitor lagMonitor) {
 
-    public KafkaProperties {
+    public EventKafkaProperties {
         if (topics == null) topics = List.of();
         if (lagMonitor == null) lagMonitor = new LagMonitor(false, 60_000L, List.of());
     }

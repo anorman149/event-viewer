@@ -7,7 +7,7 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ListOffsetsResult;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.TopicPartition;
-import org.eventviewer.ingest.config.KafkaProperties;
+import org.eventviewer.ingest.config.EventKafkaProperties;
 import org.eventviewer.leader.LeaderAwareScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -22,18 +22,18 @@ public class KafkaLagMonitor {
     private final AdminClient adminClient;
     private final LeaderAwareScheduler leaderAwareScheduler;
     private final MeterRegistry meterRegistry;
-    private final KafkaProperties.LagMonitor lagMonitorConfig;
+    private final EventKafkaProperties.LagMonitor lagMonitorConfig;
     private final Map<String, AtomicLong> lagGauges = new ConcurrentHashMap<>();
 
     public KafkaLagMonitor(
             AdminClient adminClient,
             LeaderAwareScheduler leaderAwareScheduler,
             MeterRegistry meterRegistry,
-            KafkaProperties kafkaProperties) {
+            EventKafkaProperties eventKafkaProperties) {
         this.adminClient = adminClient;
         this.leaderAwareScheduler = leaderAwareScheduler;
         this.meterRegistry = meterRegistry;
-        this.lagMonitorConfig = kafkaProperties.lagMonitor();
+        this.lagMonitorConfig = eventKafkaProperties.lagMonitor();
     }
 
     @Timed(value = "kafka.lag.monitor.check", histogram = true)

@@ -1,6 +1,7 @@
 package org.eventviewer.ingest;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -20,6 +21,10 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EventIngestIT extends BaseTest {
+
+    private static final List<String> ALL_SHARDED_TOPICS =
+            List.of("event-raw-1", "event-raw-2", "event-raw-3", "event-raw-4");
+
     private String url() {
         return baseUrl() + "/event/v1/events";
     }
@@ -50,15 +55,24 @@ class EventIngestIT extends BaseTest {
         assertThat(response.getBody().ingestTs()).isNotNull();
 
         try (KafkaConsumer<String, String> consumer = newConsumer("itest-happy-" + UUID.randomUUID())) {
-            consumer.subscribe(List.of("event-raw"));
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(5));
-            assertThat(records).isNotEmpty();
-            var record = records.iterator().next();
-            assertThat(record.key()).isEqualTo(eventId.toString());
+            consumer.subscribe(ALL_SHARDED_TOPICS);
 
-            KafkaEventMessage message = objectMapper.readValue(record.value(), KafkaEventMessage.class);
-            assertThat(message.schemaType()).isEqualTo("order-created");
-            assertThat(message.ingestTs()).isNotNull();
+            boolean found = false;
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (!found && System.currentTimeMillis() < deadline) {
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+                for (ConsumerRecord<String, String> record : records) {
+                    if (record.key().equals(eventId.toString())) {
+                        assertThat(record.key()).isEqualTo(eventId.toString());
+                        KafkaEventMessage message = objectMapper.readValue(record.value(), KafkaEventMessage.class);
+                        assertThat(message.schemaType()).isEqualTo("order-created");
+                        assertThat(message.ingestTs()).isNotNull();
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            assertThat(found).as("Event should appear on one of the sharded Kafka topics").isTrue();
         }
     }
 

@@ -19,16 +19,44 @@ spring:
         jwt:
           public-key-location: classpath:keys/local-public.pem
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers:
+      - localhost:9092
+    # Security: override KAFKA_SECURITY_PROTOCOL=SASL_SSL and KAFKA_SASL_JAAS_CONFIG in Helm for production
+    security:
+      protocol: SSL
+    properties:
+      sasl.mechanism: SCRAM-SHA-512
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
       retries: 3
+    consumer:
+      group-id: event-ingest-group
+      client-id: local
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 5000
+      properties:
+        group-instance-id: Local
+        session.timeout.ms: 300000
+        max.poll.interval: 10m
+        heartbeat.interval: 60s
+        fetch.max.bytes: 52428800
+        fetch.min.size: 16MB
+        fetch.max.wait: 50
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+        allow.auto.create.topics: false
     admin:
-      fail-fast: false
+      security:
+        protocol: SSL
     template:
       observation-enabled: true
+    listener:
+      observation-enabled: true
+      ack-mode: manual
 
 management:
   endpoints:
@@ -66,15 +94,41 @@ leader-election:
 event-ingest:
   kafka:
     topics:
-      - name: event-raw
-        partitions: 3
+      - name: event-raw-1
+        partitions: 2
         replication-factor: 1
         dead-letter:
-          name: event-raw-dlt
-          partitions: 1
+          name: event-raw-1.DLT
+          partitions: 2
+          replication-factor: 1
+      - name: event-raw-2
+        partitions: 2
+        replication-factor: 1
+        dead-letter:
+          name: event-raw-2.DLT
+          partitions: 2
+          replication-factor: 1
+      - name: event-raw-3
+        partitions: 2
+        replication-factor: 1
+        dead-letter:
+          name: event-raw-3.DLT
+          partitions: 2
+          replication-factor: 1
+      - name: event-raw-4
+        partitions: 2
+        replication-factor: 1
+        dead-letter:
+          name: event-raw-4.DLT
+          partitions: 2
           replication-factor: 1
     lag-monitor:
       enabled: true
       interval-ms: 60000
       consumer-group-ids:
         - event-ingest-group
+        - event-ingest-dlt-group
+  consumer:
+    # Override MY_POD_NAME and INGEST_POD_COUNT from Helm chart in production
+    pod-name: ${MY_POD_NAME:local-pod}
+    pod-count: ${INGEST_POD_COUNT:1}
