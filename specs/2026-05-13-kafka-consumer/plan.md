@@ -2,11 +2,14 @@
 
 ---
 
-## Group 1 — `RawEvent` Model & Topic Property Config
+## Group 1 — `KafkaEventMessage` Update & Topic Property Config
 
-1. Add `RawEvent` Java record to `libs/event-api`:
-   - `UUID eventId`, `String schemaType`, `String schemaVersion`, `Instant timestamp`, `JsonNode payload`
-   - `@JsonProperty` annotations on all fields matching snake_case JSON keys (`event_id`, `schema_type`, etc.)
+1. Update `KafkaEventMessage` in `libs/event-api` — merge in the fields planned for `RawEvent` rather than creating a new class:
+   - Add `@JsonProperty("schema_version") String schemaVersion`
+   - Change `Object payload` to `JsonNode payload` with `@JsonProperty("payload")`
+   - Add `@JsonProperty("timestamp")` to the existing `timestamp` field (was missing the annotation)
+   - Remove `ingestTs` field — it is not part of the inbound event wire format and should not be on this record
+   - Final shape: `UUID eventId`, `String schemaType`, `String schemaVersion`, `Instant timestamp`, `JsonNode payload` — all annotated with snake_case `@JsonProperty`
    - Unit test: round-trip serialization + deserialization via `ObjectMapper`
 
 2. Update `EventConsumerProperties` (`@ConfigurationProperties(prefix = "kafka.consumer")`) in `apps/event-ingest`:
@@ -39,12 +42,12 @@
 
 6. Create a `TopicProvisioningConfig` `@Configuration` that reads `EventConsumerProperties` and creates `NewTopic` beans dynamically (replacing/extending the Phase 2 topic config):
    - For each topic in `props.getTopics()`: `TopicBuilder.name(topic).partitions(props.getPartitionsPerTopic()).replicas(props.getReplicas()).build()`
-   - For each DLT topic (`topic + ".DLT"`): 4 partitions, 1 replica (hardcoded; DLT does not need 80 partitions)
+   - For each DLT topic (`topic + ".DLT"`): `props.getPartitionsPerTopic()` partitions, `props.getReplicas()` replicas — same as main topics so concurrency scales identically
    - Return as `List<NewTopic>` — Spring Kafka's `KafkaAdmin` picks up all `NewTopic` beans automatically
 
 7. Ensure `KafkaAdmin.autoCreate = true` is set in the consumer configuration (confirm from Phase 2 config)
 
-8. Unit test: `TopicProvisioningConfigTest` — given 4 topics in properties, verify 8 `NewTopic` beans produced (4 main + 4 DLT) with correct partition counts
+8. Unit test: `TopicProvisioningConfigTest` — given 4 topics in properties, verify 8 `NewTopic` beans produced (4 main + 4 DLT) with matching partition counts (DLT = main)
 
 ---
 
@@ -96,57 +99,59 @@
 ## Group 5 — `EventBatchListener` & `IngestPipelineService` Stub
 
 16. `EventBatchListener` implementing `BatchAcknowledgingMessageListener<String, String>`:
-    - `onMessage(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment)` — processes the batch as a whole:
-      1. Deserialize all records: iterate the list, attempt `objectMapper.readValue(record.value(), RawEvent.class)` for each; collect successes into `validEvents`, count failures
-         - On `JsonProcessingException`: log ERROR (topic, partition, offset, first 256 chars of raw value); increment `kafka.consumer.parse.failures` counter tagged with topic; do not rethrow
-      2. If `validEvents` is not empty: call `ingestPipelineService.process(validEvents, topic)`
-      3. **Explicit manual acknowledge**: call `acknowledgment.acknowledge()` — this is the only place an offset commit is triggered; called whether the batch was fully valid, partially valid, or entirely parse-failed
+    - `onMessage(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment)`:
+      1. Deserialize all records: attempt `objectMapper.readValue(record.value(), KafkaEventMessage.class)` for each; collect successes into `validEvents`, count failures
+         - On `JsonProcessingException`: log ERROR with topic, partition, and offset **only** — do NOT log the raw value or any portion of it (security: event payloads must not appear in logs); increment `kafka.consumer.parse.failures` counter tagged with `topic`; do not rethrow
+      2. Record `kafka.consumer.batch.size` `DistributionSummary` tagged with `topic` (size = `validEvents.size()`)
+      3. If `validEvents` is not empty: call `ingestPipelineService.process(validEvents)` — no topic argument; `IngestPipelineService` must not know the Kafka topic
+      4. **Acknowledge only on success**: call `acknowledgment.acknowledge()` after `process()` returns normally — if `process()` throws, do NOT acknowledge; allow Spring Kafka to retry the batch and eventually route to DLT
     - `@Timed(histogram=true, name="kafka.consumer.batch.listener")` on `onMessage`
 
 17. `IngestPipelineService` `@Service` (stub for Phase 4):
-    - `process(List<RawEvent> events, String topic)`:
-      - Logs batch size + topic at DEBUG
-      - Records `kafka.consumer.batch.size` `DistributionSummary` tagged with `topic`
+    - `process(List<KafkaEventMessage> events)` — no topic parameter; the service must not be aware of Kafka topics
+      - Logs batch size at DEBUG (no topic, no event content)
       - Returns immediately
     - `@Timed(histogram=true, name="kafka.consumer.pipeline.process")`
 
 19. Unit tests:
-    - `EventBatchListenerTest` — mock `IngestPipelineService`; mock `Acknowledgment`; send batch of 5 records (3 valid, 2 invalid JSON); verify `ingestPipelineService.process()` called with exactly 3 `RawEvent` objects; verify `kafka.consumer.parse.failures` counter = 2; verify `acknowledgment.acknowledge()` called exactly once
-    - `EventBatchListenerTest` — send batch of 5 records all invalid; verify `ingestPipelineService.process()` never called; verify `acknowledgment.acknowledge()` still called exactly once
+    - `EventBatchListenerTest` — mock `IngestPipelineService`; mock `Acknowledgment`; send batch of 5 records (3 valid, 2 invalid JSON); verify `ingestPipelineService.process()` called with exactly 3 `KafkaEventMessage` objects; verify `kafka.consumer.parse.failures` counter = 2; verify `kafka.consumer.batch.size` recorded as 3; verify `acknowledgment.acknowledge()` called exactly once
+    - `EventBatchListenerTest` — send batch of 5 records all invalid; verify `ingestPipelineService.process()` never called; verify `acknowledgment.acknowledge()` still called (all-invalid batch is not a processing failure; parse failures are already counted)
+    - `EventBatchListenerTest` — `ingestPipelineService.process()` throws `RuntimeException`; verify `acknowledgment.acknowledge()` is **never** called (Spring Kafka must retry)
 
 ---
 
 ## Group 6 — `DltConsumerContainerFactory` & `DltBatchMessageListener`
 
 20. `DltBatchMessageListener` `@Component` implementing `BatchAcknowledgingMessageListener<String, String>`:
-    - `onMessage(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment)`:
-      - Receives the full batch; processes as a unit
-      - For each record: attempt `ingestPipelineService.process(...)` with up to 100 retries (fixed 5 s delay); implemented as a local retry loop — no Spring Retry annotations
-      - On success within 100 tries: increment `kafka.consumer.dlt.recovered`
-      - On 100th failure: log ERROR with full stack trace + topic + offset + raw bytes; increment `kafka.consumer.dlt.exhausted`
-      - **Explicit manual acknowledge**: `acknowledgment.acknowledge()` called once after all records in the batch are handled — never called per-record
+    - `onMessage(List<ConsumerRecord<String, String>> records, Acknowledgment acknowledgment)` — mirrors the main listener; Spring Kafka handles the retry loop via the container's error handler, not application code:
+      1. Deserialize records: same parse logic as `EventBatchListener`; on `JsonProcessingException` log ERROR with topic/partition/offset only (no raw value); increment `kafka.consumer.parse.failures` tagged with topic
+      2. Increment `kafka.consumer.dlt.received` counter tagged with topic (once per DLT message, before processing)
+      3. Record `kafka.consumer.batch.size` `DistributionSummary` tagged with topic
+      4. If `validEvents` is not empty: call `ingestPipelineService.process(validEvents)` — same method, same signature as the main listener
+      5. **Acknowledge only on success**: `acknowledgment.acknowledge()` after `process()` returns normally; if `process()` throws, do NOT acknowledge — the container's `DefaultErrorHandler` retries up to 99 times; after all retries are exhausted the error handler's recoverer takes over (logging + counter; no further routing)
     - `@Timed(histogram=true, name="kafka.consumer.dlt.listener")`
 
 21. `DltConsumerContainerFactory` `@Component` implementing `SmartLifecycle`:
-    - Same structure as `EventConsumerContainerFactory` but iterates `{topic}.DLT` names
-    - DLT containers always use `concurrency = 1` (DLT processing is sequential by design — no `computeConcurrency` call)
+    - Same structure as `EventConsumerContainerFactory` but iterates `{topic}.DLT` topic names
+    - **Same concurrency algorithm**: `concurrency = ConcurrencyCalculator.computeConcurrency(props.getPartitionsPerTopic(), ConcurrencyCalculator.resolvePodCount())` — DLT topics have the same partition count as main topics so the same formula applies
     - Container properties: `AckMode.MANUAL_IMMEDIATE`; `setBatchAcknowledgingMessageListener(dltBatchMessageListener)`
-    - No `DefaultErrorHandler` on DLT containers — failures are handled inside `DltBatchMessageListener`; never route to another DLT
+    - Attach a `DefaultErrorHandler` with `ExponentialBackOffWithMaxRetries(99)` — Spring Kafka drives up to 99 retry attempts after the initial DLT delivery; on final exhaustion the recoverer logs ERROR (topic + offset, no payload) and increments `kafka.consumer.dlt.exhausted` — **no further routing**; the record is considered past control and processing stops
+    - `addNotRetryableExceptions(JsonProcessingException.class, MismatchedInputException.class)` on the DLT error handler as well — parse errors are already swallowed inside the listener, but this is a safety net so they are never retried if they somehow escape
     - `group.id = event-ingest-dlt-group`; `group.instance.id = {MY_POD_NAME}-dlt-{topic}`
 
-22. Unit test: `DltBatchMessageListenerTest` — mock `IngestPipelineService`; mock `Acknowledgment`; simulate 2 failures then success; verify `dlt.recovered` counter = 1; simulate 100 consecutive failures; verify `dlt.exhausted` counter = 1; verify `acknowledgment.acknowledge()` called exactly once in both cases
+22. Unit test: `DltBatchMessageListenerTest` — mock `IngestPipelineService`; mock `Acknowledgment`; send batch of 3 DLT records (2 valid, 1 invalid); verify `ingestPipelineService.process()` called with 2 events; verify `dlt.received` counter = 2; verify `acknowledgment.acknowledge()` called once on success; verify `acknowledgment.acknowledge()` NOT called when `process()` throws
 
 ---
 
 ## Group 7 — Observability
 
 21. Meters summary (all tagged with at minimum `topic`):
-    - `kafka.consumer.parse.failures` — Counter — malformed JSON records skipped (`EventBatchListener`)
-    - `kafka.consumer.batch.size` — DistributionSummary — events per batch after parse filtering (`IngestPipelineService`)
-    - `kafka.consumer.dlt.received` — Counter — messages received by DLT consumer (increment at start of each record in `DltBatchMessageListener`)
-    - `kafka.consumer.dlt.recovered` — Counter — DLT messages resolved within 100 retries
-    - `kafka.consumer.dlt.exhausted` — Counter — DLT messages that failed all 100 retries
-    - `kafka.consumer.batch.listener` — Timed histogram — end-to-end batch processing time
+    - `kafka.consumer.parse.failures` — Counter — malformed JSON records skipped (`EventBatchListener` and `DltBatchMessageListener`)
+    - `kafka.consumer.batch.size` — DistributionSummary — valid events per batch after parse filtering (`EventBatchListener` and `DltBatchMessageListener`; NOT in `IngestPipelineService`)
+    - `kafka.consumer.dlt.received` — Counter — valid messages received by DLT consumer, incremented before `process()` (`DltBatchMessageListener`)
+    - `kafka.consumer.dlt.exhausted` — Counter — DLT messages that exhausted all container retries (logged + counted in DLT container's `DefaultErrorHandler` recoverer)
+    - `kafka.consumer.batch.listener` — Timed histogram — end-to-end batch processing time (`EventBatchListener`)
+    - `kafka.consumer.dlt.listener` — Timed histogram — end-to-end DLT batch processing time (`DltBatchMessageListener`)
 
 22. Confirm `KafkaLagMonitor` from Phase 3 is registered with `event-ingest-group` and `event-ingest-dlt-group` as consumer groups to monitor
 
@@ -159,7 +164,7 @@
 24. `BaseTest` (from Phase 2/3 itest) — confirm `KafkaTemplate` autowired for test publishing; confirm Docker Compose starts Kafka
 
 25. `EventConsumerIT`:
-    - Publish 100 valid `RawEvent` JSON messages to `event-raw-1`
+    - Publish 100 valid `KafkaEventMessage` JSON messages to `event-raw-1`
     - Wait for `ingestPipelineService.process()` to be called (use `CountDownLatch` or `Awaitility`; `IngestPipelineService` is a real bean in this test but the stub body suffices)
     - Assert `kafka.consumer.batch.size` DistributionSummary count ≥ 1
     - Assert consumer group `event-ingest-group` has committed offsets for `event-raw-1` in Kafka (verify via `AdminClient.listConsumerGroupOffsets`)
@@ -172,10 +177,10 @@
     - Assert no messages on `event-raw-1.DLT`
 
 27. `DltRetryIT`:
-    - Replace `IngestPipelineService` with a mock that throws `RuntimeException` for the first N calls
-    - Publish 1 record; verify it reaches `event-raw-1.DLT` after 3 main-topic retry exhaustions
-    - Verify `DltBatchMessageListener` receives and processes the DLT message
-    - Verify `kafka.consumer.dlt.recovered` counter = 1 after mock recovers
+    - Replace `IngestPipelineService` with a mock that throws `RuntimeException` for the first N calls then succeeds
+    - Publish 1 record; verify it reaches `event-raw-1.DLT` after 3 main-topic retry exhaustions (container's `DefaultErrorHandler` routes it)
+    - Verify `DltBatchMessageListener` receives the DLT message; Spring Kafka container retries on the DLT side until mock recovers
+    - Verify `kafka.consumer.dlt.received` counter = 1 after the DLT message is processed successfully
 
 ---
 

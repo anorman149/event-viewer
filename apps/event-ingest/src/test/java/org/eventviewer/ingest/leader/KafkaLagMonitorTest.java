@@ -8,7 +8,7 @@ import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
-import org.eventviewer.ingest.config.KafkaProperties;
+import org.eventviewer.ingest.config.EventKafkaProperties;
 import org.eventviewer.ingest.monitor.KafkaLagMonitor;
 import org.eventviewer.leader.LeaderAwareScheduler;
 import org.eventviewer.leader.LeaderAwareSchedulerImpl;
@@ -44,11 +44,11 @@ class KafkaLagMonitorTest {
         registry = new SimpleMeterRegistry();
         LeaderAwareScheduler scheduler = new LeaderAwareSchedulerImpl(leaderElectionService, registry);
 
-        KafkaProperties kafkaProperties = new KafkaProperties(
+        EventKafkaProperties eventKafkaProperties = new EventKafkaProperties(
                 List.of(),
-                new KafkaProperties.LagMonitor(true, 60_000L, List.of("event-ingest-group")));
+                new EventKafkaProperties.LagMonitor(true, 60_000L, List.of("event-ingest-group")));
 
-        monitor = new KafkaLagMonitor(adminClient, scheduler, registry, kafkaProperties);
+        monitor = new KafkaLagMonitor(adminClient, scheduler, registry, eventKafkaProperties);
     }
 
     @Test
@@ -133,7 +133,7 @@ class KafkaLagMonitorTest {
 
     @Test
     void defaultLagMonitorIntervalMs() {
-        var lagMonitor = new KafkaProperties.LagMonitor(true, 0L, List.of());
+        var lagMonitor = new EventKafkaProperties.LagMonitor(true, 0L, List.of());
         assertThat(lagMonitor.intervalMs()).isEqualTo(60_000L);
     }
 
