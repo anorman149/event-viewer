@@ -2,52 +2,204 @@
 
 ---
 
-## Group 1 — New Library Module & Kubernetes Client Dependency (`libs/leader`)
+## Group 1 — Redis Infrastructure
 
-1. Add `include ':libs:leader'` to root `settings.gradle`; create `libs/leader/build.gradle` with `java-library` plugin, `spring-boot-starter` dependency, and `io.kubernetes:client-java` (pinned version); confirm no transitive conflict with Spring Boot BOM via `./gradlew :libs:leader:dependencies`
-2. Add `LeaderElectionProperties` — `@ConfigurationProperties(prefix = "kubernetes.leader-election")`; fields: `enabled` (boolean, default false), `leaseName` (String, default `event-ingest-leader`), `namespace` (String, default `default`), `leaseDurationSeconds` (int, default 15), `renewDeadlineSeconds` (int, default 10), `retryPeriodSeconds` (int, default 2); validated with `@Validated` (`@Min` on timing fields, cross-field check: `renewDeadline < leaseDuration` and `retryPeriod < renewDeadline`)
-3. Register `LeaderElectionProperties` and `LeaderElectionAutoConfiguration` in `libs/leader/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` so any app depending on `libs/leader` picks them up automatically
-4. Unit test: `LeaderElectionPropertiesTest` — binding from YAML, cross-field validation rejects invalid timing combos
+1. Add Redis service to `docker-compose.yml`:
+   ```yaml
+   redis:
+     image: redis:7-alpine
+     ports:
+       - "6379:6379"
+     command: redis-server --save "" --appendonly no
+     healthcheck:
+       test: ["CMD", "redis-cli", "ping"]
+       interval: 5s
+       timeout: 3s
+       retries: 10
+   ```
+   No named volume — leader election state is ephemeral and must not survive Redis restarts.
+
+2. Add identical Redis service to `docker-compose-test.yml` (same image, ephemeral, same healthcheck).
+
+3. Add Redis connection properties to `apps/event-ingest/src/main/resources/application.yml`:
+   ```yaml
+   spring:
+     data:
+       redis:
+         host: ${REDIS_HOST:localhost}
+         port: ${REDIS_PORT:6379}
+         password: ${REDIS_PASSWORD:}
+   ```
 
 ---
 
-## Group 2 — `LeaderElectionService` (`libs/leader`)
+## Group 2 — `libs/leader` Module, Dependencies & Properties
 
-5. `LeaderElectedEvent` and `LeaderRelinquishedEvent` — plain Spring `ApplicationEvent` subclasses carrying `podName` and `leaseName`
-6. `LeaderElectionService` interface — `boolean isLeader()`, `String currentLeader()` (returns holder identity or empty string)
-7. `KubernetesLeaderElectionService` — implementation; uses `io.kubernetes.client.extended.leaderelection.LeaderElector`; runs election loop on a dedicated virtual thread (daemon); updates `volatile boolean leader` flag on ACQUIRE / RELINQUISH callbacks; publishes events to `ApplicationEventPublisher`; implements `DisposableBean` to release lease on shutdown
-8. `StandaloneLeaderElectionService` — fallback implementation when `kubernetes.leader-election.enabled=false`; `isLeader()` always returns `true`; publishes `LeaderElectedEvent` on `@PostConstruct`
-9. `LeaderElectionAutoConfiguration` — `@ConditionalOnProperty(name="kubernetes.leader-election.enabled", havingValue="true")` registers `KubernetesLeaderElectionService`; else registers `StandaloneLeaderElectionService`; both exposed as `LeaderElectionService` bean
-10. Unit tests:
-    - `KubernetesLeaderElectionServiceTest` — mock `LeaderElector`; verify `isLeader()` transitions, events published on acquire/relinquish, graceful shutdown releases lease
-    - `StandaloneLeaderElectionServiceTest` — verify `isLeader()` always true, `LeaderElectedEvent` published on startup
+4. Add `include ':libs:leader'` to root `settings.gradle`; create `libs/leader/build.gradle` with `java-library` plugin, `spring-boot-starter`, and `org.redisson:redisson-spring-boot-starter` (pinned version); confirm no transitive conflict via `./gradlew :libs:leader:dependencies --configuration runtimeClasspath`.
+
+5. `RedisLeaderElectionProperties` — `@ConfigurationProperties(prefix = "leader-election")`; fields:
+   - `lockName` (String, default `leader:event-ingest`) — also used as prefix for fencing counter key (`{lockName}:fence`)
+   - `retryIntervalMs` (long, default 2000) — `@Min(500)` validation
+   - `lockWatchdogTimeoutMs` (long, default 30000) — `@Min(5000)` validation; must be > `retryIntervalMs` (`@AssertTrue` cross-field)
+   Annotate with `@Validated`.
+
+6. `LeaderTask` — `@FunctionalInterface` in `libs/leader`; single method `void execute() throws Exception`. This is the functional type accepted by `LeaderAwareScheduler`.
+
+7. `LeaderListener` — interface in `libs/leader`:
+   ```java
+   public interface LeaderListener {
+       void onLeader(long fencingToken);
+       void onLeaderLoss(long fencingToken);
+   }
+   ```
+   Any Spring bean implementing this interface is automatically discovered via `List<LeaderListener>` constructor injection into `RedissonLeaderElectionService`.
+
+8. `LeaderElectionService` interface — `boolean isLeader()`, `long getFencingToken()` (returns current token when leader, `-1L` when not).
+
+9. Register `LeaderElectionAutoConfiguration` in `libs/leader/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
+
+10. Unit test: `RedisLeaderElectionPropertiesTest` — binding from YAML fixture; `@Min` validation rejects `retryIntervalMs < 500`; cross-field check rejects `lockWatchdogTimeoutMs <= retryIntervalMs`.
 
 ---
 
-## Group 3 — `LeaderAwareScheduler` (`libs/leader`)
+## Group 3 — `RedissonLeaderElectionService` (`libs/leader`)
 
-11. `LeaderAwareScheduler` interface — single method `void runIfLeader(Runnable task)`
-12. `LeaderAwareSchedulerImpl` — injects `LeaderElectionService`; `runIfLeader` calls `isLeader()` and, if true, executes task; if false, increments `leader_aware_scheduler.skipped_total` counter and returns immediately
-13. `@Timed(histogram=true, name="leader_aware_scheduler.execution")` on the execution path
-14. Register `LeaderAwareSchedulerImpl` as a bean in `LeaderElectionAutoConfiguration` (both K8s and standalone branches)
-15. Unit tests: task runs when leader, task skipped + counter incremented when follower, exception in task does not crash scheduler or propagate to caller
+11. `RedissonLeaderElectionService` — implements `LeaderElectionService`, `DisposableBean`:
+    - Constructor-injects `RedissonClient`, `RedisLeaderElectionProperties`, `List<LeaderListener>`, `MeterRegistry`
+    - Registers all meters in constructor: `leader.election.acquisitions` counter, `leader.election.relinquishments` counter, `leader.election.connection.losses` counter, `leader.election.is.leader` gauge (backed by `AtomicInteger`), `leader.election.fencing.token` gauge (backed by `AtomicLong`, value -1 initially)
+    - Builds `RLock lock = redissonClient.getLock(properties.getLockName())`
+    - Builds `RAtomicLong fencingCounter = redissonClient.getAtomicLong(properties.getLockName() + ":fence")`
+    - `volatile boolean isLeaderFlag` and `volatile long currentFencingToken = -1L` — read by `isLeader()` and `getFencingToken()` with no Redis call
+
+12. `@PostConstruct startElectionLoop()` — submits the loop to a single-thread executor. Returns immediately; bootstrapping is not blocked:
+    ```java
+    private final ExecutorService electionExecutor =
+        Executors.newSingleThreadExecutor(Thread.ofVirtual().name("leader-election-loop").factory());
+
+    @PostConstruct
+    void startElectionLoop() {
+        electionExecutor.submit(this::runElectionLoop);
+    }
+    ```
+
+13. `runElectionLoop()` implementation:
+    ```java
+    private void runElectionLoop() {
+        while (!Thread.currentThread().isInterrupted() && !shuttingDown) {
+            try {
+                boolean acquired = lock.tryLock(0, -1, SECONDS); // no wait; watchdog manages TTL
+                if (acquired) {
+                    long token = fencingCounter.incrementAndGet();
+                    currentFencingToken = token;
+                    isLeaderFlag = true;
+                    isLeaderGauge.set(1);
+                    fencingTokenGauge.set(token);
+                    acquisitionsCounter.increment();
+                    listeners.forEach(l -> l.onLeader(token));
+
+                    // Monitor lock retention
+                    while (lock.isHeldByCurrentThread()
+                            && !Thread.currentThread().isInterrupted()
+                            && !shuttingDown) {
+                        Thread.sleep(properties.getRetryIntervalMs() / 2);
+                    }
+
+                    if (!shuttingDown) {
+                        // Connection drop or TTL expiry — not a clean shutdown
+                        long lostToken = currentFencingToken;
+                        isLeaderFlag = false;
+                        currentFencingToken = -1L;
+                        isLeaderGauge.set(0);
+                        fencingTokenGauge.set(-1L);
+                        relinquishmentsCounter.increment();
+                        connectionLossesCounter.increment();
+                        listeners.forEach(l -> l.onLeaderLoss(lostToken));
+                    }
+                } else {
+                    Thread.sleep(properties.getRetryIntervalMs());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+    ```
+
+14. `destroy()` — graceful shutdown:
+    ```java
+    @Override
+    public void destroy() throws Exception {
+        shuttingDown = true;
+        electionExecutor.shutdownNow(); // interrupts the loop thread
+        if (lock.isHeldByCurrentThread()) {
+            long token = currentFencingToken;
+            isLeaderFlag = false;
+            currentFencingToken = -1L;
+            isLeaderGauge.set(0);
+            fencingTokenGauge.set(-1L);
+            relinquishmentsCounter.increment();
+            lock.unlock();
+            listeners.forEach(l -> l.onLeaderLoss(token));
+        }
+        electionExecutor.awaitTermination(5, SECONDS);
+    }
+    ```
+
+15. `LeaderElectionAutoConfiguration` — registers `RedissonLeaderElectionService` as `LeaderElectionService` bean and `LeaderAwareSchedulerImpl` as `LeaderAwareScheduler` bean.
+
+16. Unit tests (`RedissonLeaderElectionServiceTest`) — mock `RedissonClient`, `RLock`, `RAtomicLong`, `MeterRegistry`, and use a test `LeaderListener` that records calls:
+    - `tryLock` returns `false` → `isLeader()` is `false`; no listener notified; `getFencingToken()` = -1L
+    - `tryLock` returns `true` → `isLeader()` is `true`; `onLeader(token)` called on all listeners; `getFencingToken()` returns mocked `incrementAndGet()` value; acquisitions counter = 1
+    - `isHeldByCurrentThread()` returns `true` then `false` (while not shutting down) → `onLeaderLoss(token)` called; `isLeader()` is `false`; connection-losses counter = 1; relinquishments counter = 1
+    - `destroy()` when leader → `lock.unlock()` called; `onLeaderLoss(token)` called on all listeners; relinquishments counter = 1
+    - `destroy()` when not leader → `lock.unlock()` never called; no listener notified
+    - `tryLock` fails three times then succeeds → `onLeader()` eventually called; acquisitions counter = 1
 
 ---
 
-## Group 4 — `KafkaLagMonitor` (`apps/event-ingest`)
+## Group 4 — `LeaderAwareScheduler` (`libs/leader`)
 
-16. Add `implementation project(':libs:leader')` to `apps/event-ingest/build.gradle`
-17. `KafkaLagMonitorProperties` — `@ConfigurationProperties(prefix = "kafka.lag-monitor")`; fields: `enabled` (boolean), `intervalMs` (long, default 60000 — once per minute), `consumerGroupIds` (List<String>)
-18. `KafkaLagMonitor` — Spring `@Service`; constructor-injects `AdminClient`, `LeaderAwareScheduler`, `MeterRegistry`, `KafkaLagMonitorProperties`
-19. `@Scheduled` method (virtual thread executor from Phase 2); wraps body in `leaderAwareScheduler.runIfLeader(...)`:
-    - calls `AdminClient.listConsumerGroupOffsets(groupId)` for each configured group
-    - calls `AdminClient.listOffsets(topicPartitions)` with `OffsetSpec.latest()` for the same partitions
-    - computes lag per (group, topic, partition) = latest offset − committed offset
-    - upserts `kafka.consumer.lag` `Gauge` per `(group, topic, partition)` tag tuple via `Gauge.builder(...).register(meterRegistry)` (upsert pattern — second call updates value, does not register a second gauge)
-20. `kafka.consumer.lag` gauge retains its last value when the pod is a follower (monitor skips; gauge is not removed — acceptable and documented)
-21. `@Timed(histogram=true, name="kafka.lag_monitor.check")` on the full execution
-22. Unit tests: `KafkaLagMonitorTest` — mock `AdminClient`; verify gauges registered per (group, topic, partition); verify no `AdminClient` calls when `isLeader()` returns false; verify upsert behavior on second invocation
-23. Add to `apps/event-ingest/application.yml`:
+17. `LeaderAwareScheduler` interface — `void runIfLeader(LeaderTask task) throws Exception`.
+
+18. `LeaderAwareSchedulerImpl` — injects `LeaderElectionService`; calls `isLeader()`:
+    - If `true`: executes `task.execute()`; any exception propagates directly to the caller
+    - If `false`: increments `leader.aware.scheduler.skipped` counter; returns without executing
+    - Wraps the execution path with `@Timed(histogram=true, name="leader.aware.scheduler.execution")`
+
+19. Register `LeaderAwareSchedulerImpl` in `LeaderElectionAutoConfiguration`.
+
+20. Unit tests:
+    - Task runs and returns when leader; no exception is suppressed
+    - Task throws `IOException`; assert it propagates from `runIfLeader()`
+    - Task throws `RuntimeException`; assert it propagates
+    - `leader.aware.scheduler.skipped` counter = 1 when not leader; task never called
+    - `leader.aware.scheduler.execution` timer registered in `SimpleMeterRegistry` after a leader execution
+
+---
+
+## Group 5 — `KafkaLagMonitor` (`apps/event-ingest`)
+
+21. Add `implementation project(':libs:leader')` to `apps/event-ingest/build.gradle`.
+
+22. `KafkaLagMonitorProperties` — `@ConfigurationProperties(prefix = "kafka.lag-monitor")`; fields: `enabled` (boolean), `intervalMs` (long, default 60000), `consumerGroupIds` (List<String>).
+
+23. `KafkaLagMonitor` — Spring `@Service`; constructor-injects `AdminClient`, `LeaderAwareScheduler`, `MeterRegistry`, `KafkaLagMonitorProperties`.
+
+24. `@Scheduled` method (virtual thread executor from Phase 2); body wrapped in `leaderAwareScheduler.runIfLeader(...)`:
+    - `AdminClient.listConsumerGroupOffsets(groupId)` for each configured group
+    - `AdminClient.listOffsets(topicPartitions, OffsetSpec.latest())`
+    - lag per (group, topic, partition) = latestOffset − committedOffset
+    - Upsert `kafka.consumer.lag` `Gauge` per tag tuple — Micrometer deduplicates by tag set
+
+25. `@Timed(histogram=true, name="kafka.lag.monitor.check")` on the full scheduled method.
+
+26. Unit tests (`KafkaLagMonitorTest`) — the primary assertions are behavioral, not metric-based (see Rules.md):
+    - Mock `AdminClient`; `isLeader()` returns `false`; trigger scheduled method; assert zero `AdminClient` interactions
+    - `isLeader()` returns `true`; mock returns 2 partitions for 1 group/topic; assert `AdminClient.listConsumerGroupOffsets()` called with the correct group ID; assert `AdminClient.listOffsets()` called with the correct partitions
+    - Verify lag computation correctness: given latestOffset=100 and committedOffset=90, assert lag=10 is passed to the gauge builder
+    - Default `intervalMs` binding test asserts `intervalMs == 60000`
+
+27. Add to `apps/event-ingest/src/main/resources/application.yml`:
     ```yaml
     kafka:
       lag-monitor:
@@ -55,52 +207,37 @@
         interval-ms: 60000
         consumer-group-ids:
           - event-ingest-group
+
+    leader-election:
+      lock-name: leader:event-ingest
+      retry-interval-ms: 2000
+      lock-watchdog-timeout-ms: 30000
     ```
 
 ---
 
-## Group 5 — Observability Meters (`libs/leader` + `apps/event-ingest`)
+## Group 6 — Integration Tests (`apps/event-ingest/src/itest`)
 
-24. In `KubernetesLeaderElectionService` and `StandaloneLeaderElectionService`:
-    - `leader_election_acquisitions_total` — `Counter`; incremented on each ACQUIRE callback (standalone: incremented once on startup)
-    - `leader_election_relinquishments_total` — `Counter`; incremented on each RELINQUISH callback
-    - `leader_election_is_leader` — `Gauge` backed by `AtomicInteger` (1 when leader, 0 when follower); registered on construction
-25. Verify all meters appear under `GET /actuator/prometheus` in the `event-ingest` integration test
-26. Confirm `apps/event-ingest/application.yml` has the `management.tracing` block from Phase 2; add `kafka.template.observation-enabled: true` if not already present
+28. `LeaderElectionIT` — registers a `TestLeaderListener` bean (`@TestConfiguration`) that records `onLeader()` calls; starts application with Redis running; asserts:
+    - `leaderElectionService.isLeader()` returns `true`
+    - `leaderElectionService.getFencingToken()` returns a value `> 0`
+    - `testLeaderListener.onLeaderCallCount()` equals 1
+    - `testLeaderListener.lastFencingToken()` matches `leaderElectionService.getFencingToken()`
 
----
+29. `KafkaLagMonitorIT` — overrides `kafka.lag-monitor.interval-ms=500` via `@TestPropertySource`; waits 600 ms for one firing; asserts:
+    - `adminClientSpy.listConsumerGroupOffsetsInvocationCount()` ≥ 1 (spy or captured argument)
+    - No exception thrown during the run
 
-## Group 6 — K8s Manifests (`infra/k8s/`)
-
-27. Create `infra/` at repo root; create `infra/k8s/` subdirectory
-28. `infra/k8s/leader-election-rbac.yaml`:
-    - `ServiceAccount` named `event-ingest`
-    - `Role` with rules: `apiGroups: ["coordination.k8s.io"]`, `resources: ["leases"]`, `verbs: ["get", "create", "update"]`
-    - `RoleBinding` binding the role to the service account
-    - Namespace parameterizable (comment indicating kustomize overlay or `envsubst` for CI)
-29. `infra/k8s/event-ingest-deployment.yaml`:
-    - `spec.replicas: 2` (minimum for testing leader election)
-    - `serviceAccountName: event-ingest`
-    - `env` entries for `MY_POD_NAME` (downward API `metadata.name`) and `MY_POD_NAMESPACE` (`metadata.namespace`)
-    - `env` entries for `KUBERNETES_LEADER_ELECTION_ENABLED=true`, `KUBERNETES_LEADER_ELECTION_LEASE_NAME=event-ingest-leader`
-    - `SPRING_PROFILES_ACTIVE=local` for local K8s dev
-    - Resource requests/limits placeholder (comment: fill in after benchmarking phase)
-    - Liveness probe: `GET /actuator/health/liveness`, readiness probe: `GET /actuator/health/readiness`
-30. `infra/k8s/README.md` — local K8s deployment steps: build image, push to local registry, `kubectl apply -f infra/k8s/`, commands to verify leader election, commands to test failover
+30. `LeaderElectionConnectionIT` — uses a `@TestConfiguration` to replace `RLock` with a spy that throws `RedisConnectionException` on the first `tryLock()` call, then delegates to a real mock that returns `true`; asserts:
+    - Within 3 × `retryIntervalMs`, `leaderElectionService.isLeader()` becomes `true`
+    - `leaderElectionService.getFencingToken()` > 0
 
 ---
 
-## Group 7 — Integration Tests (`apps/event-ingest/src/itest`)
+## Group 7 — CI & Build Wiring
 
-31. Confirm `BaseTest` exists from Phase 2 itest suite
-32. `LeaderElectionIT` — start application with `kubernetes.leader-election.enabled=false` (standalone mode); `GET /actuator/prometheus` response body contains `leader_election_is_leader` with value `1.0`; `leader_election_acquisitions_total` counter = 1
-33. `KafkaLagMonitorIT` — start application in standalone mode; wait one monitor interval (60 s; consider setting `kafka.lag-monitor.interval-ms=500` via `@TestPropertySource` for the itest to avoid a 60 s wait); verify `kafka.consumer.lag` gauge appears in `/actuator/prometheus` for the configured consumer group
-34. Manual local K8s test (not automated CI) — steps documented in `infra/k8s/README.md`: deploy 2 replicas, `kubectl logs` confirm single leader, `kubectl delete pod <leader>`, verify second pod logs ACQUIRED within `leaseDurationSeconds`
+31. Confirm `jvmArgs '-Dnet.bytebuddy.experimental=true'` in root `build.gradle` covers the new `:libs:leader` subproject (verify `allprojects` or `subprojects` scope).
 
----
+32. `libs/leader` has unit tests only; confirm absence of an `itest` source set does not break the `check.dependsOn itest` task wiring (add `if (sourceSets.findByName('itest'))` guard or equivalent).
 
-## Group 8 — CI & Build Wiring
-
-35. Confirm `jvmArgs '-Dnet.bytebuddy.experimental=true'` in root `build.gradle` covers the new `:libs:leader` subproject (verify `allprojects` or `subprojects` scope)
-36. `libs/leader` has unit tests only (no itest); confirm it is excluded from `check.dependsOn itest` wiring or that the absence of an `itest` source set does not break the task
-37. Confirm `./gradlew build` passes end-to-end: all modules compile, all unit tests pass, `event-ingest` itest passes
+33. Confirm `./gradlew build` passes end-to-end: all modules compile, all unit tests pass, `event-ingest` itest passes with Redis available.

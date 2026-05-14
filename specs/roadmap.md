@@ -33,14 +33,14 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** Distributed leadership coordination ensures that exactly one pod runs scheduled tasks at any time. All future phases that require a singleton scheduler (lag monitoring, rule-cache refresh, retention jobs) depend on this infrastructure.
 
-- [ ] K8s leader election via Coordination API (Lease objects) using official Kubernetes Java client; isolated in new `libs/leader` library (keeps heavy `client-java` transitive deps out of `libs/common`)
-- [ ] `LeaderElectionService` — acquires and renews a Lease; publishes `LeaderElectionEvent` (ACQUIRED / RELINQUISHED) to the Spring `ApplicationEventPublisher`; exposes `isLeader()` for synchronous checks
-- [ ] `LeaderAwareScheduler` abstraction — wraps any `Runnable` to only execute on the current leader pod; no-op on followers
-- [ ] Non-K8s fallback — `kubernetes.leader-election.enabled=false` causes `isLeader()` to always return `true` (single-node dev / CI mode)
-- [ ] `KafkaLagMonitor` in `apps/event-ingest` — `@Scheduled` bean (interval: 60 s); runs via `LeaderAwareScheduler`; queries Kafka `AdminClient` for consumer group lag on all configured topics; emits `kafka.consumer.lag` gauge per (topic, partition, consumer-group) tuple
-- [ ] K8s RBAC manifests in `infra/k8s/` — `ServiceAccount`, `Role` (leases: get/create/update), `RoleBinding`; `MY_POD_NAME` and `MY_POD_NAMESPACE` injected via downward API; `infra/` is the root folder for all infrastructure-as-code
-- [ ] Local K8s deployment test — `event-ingest` deployed at 2 replicas; verify single leader, verify leadership transfer after pod kill
-- [ ] Observability — `leader_election_acquisitions_total` counter, `leader_election_is_leader` gauge (1/0), `kafka_consumer_lag` gauge per partition
+- [x] Redis added to `docker-compose.yml` and `docker-compose-test.yml` (standalone, ephemeral — no named volume); Redis is always required; no always-leader fallback mode
+- [x] `libs/leader` library — Redisson `RLock` with watchdog-managed TTL; `RedissonLeaderElectionService` submits the election loop to a single-thread executor at startup (bootstrapping returns immediately); exposes `isLeader()` and `getFencingToken()` as locally-cached reads (no Redis call)
+- [x] Fencing token — `RAtomicLong` in Redis incremented on each lock acquisition; exposed via `getFencingToken()`; protected operations compare the token before committing writes to guard against zombie leaders
+- [x] `LeaderListener` interface — beans implementing `LeaderListener` are auto-discovered via Spring `List<LeaderListener>` injection; notified with `onLeader()` / `onLeaderLoss()` on state transitions; fencing token accessible via `LeaderElectionService.getFencingToken()`; no Spring `ApplicationEventPublisher` used
+- [x] Failure-mode protections — graceful shutdown explicitly releases the lock and notifies listeners (immediate handoff); JVM kill lets watchdog TTL expire (default 30 s); network partition detected via `isHeldByCurrentThread()` monitoring; all failure paths notify listeners
+- [x] `LeaderAwareScheduler` — `runIfLeader(LeaderTask task) throws Exception`; executes task only when leader; propagates all exceptions; no-op on followers
+- [x] `KafkaLagMonitor` in `apps/event-ingest` — `@Scheduled` bean (interval: 60 s); runs via `LeaderAwareScheduler`; queries Kafka `AdminClient` for consumer group lag; emits `kafka.consumer.lag` gauge per (topic, partition, consumer-group) tuple
+- [x] Observability — dot-notation Micrometer metrics: `leader.election.acquisitions`, `leader.election.relinquishments`, `leader.election.connection.losses`, `leader.election.is.leader`, `leader.election.fencing.token`, `kafka.consumer.lag` per partition
 
 ---
 
@@ -262,7 +262,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 ```
 Phase 1 (Skeleton)
   └─ Phase 2 (Kafka Ingest: topic + REST endpoint)
-       └─ Phase 3 (Leader Election: K8s lease, LeaderAwareScheduler, KafkaLagMonitor)
+       └─ Phase 3 (Leader Election: Redis lock, LeaderAwareScheduler, KafkaLagMonitor)
             └─ Phase 4 (Kafka Consumer: batch listener, SASL, manual ack, retry/DLT)
                  └─ Phase 5 (S3 Storage: per-event ZSTD, Hive keys, virtual-thread GET Range)
                  └─ Phase 6 (OpenSearch Schema Manager: OsAdminClient, OsDocumentClient, @OsIndex, OsSchemaManager) ← also needs Phase 3

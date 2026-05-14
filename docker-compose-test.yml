@@ -42,6 +42,12 @@ services:
       DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
 
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  valkey:
+    image: valkey/valkey:latest
+    ports:
+      - "6379:6379"
+
   # ── LocalStack (S3) ────────────────────────────────────────────────────────
   localstack:
     image: localstack/localstack:3

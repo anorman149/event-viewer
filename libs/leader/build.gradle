@@ -1,0 +1,8 @@
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.redisson:redisson-spring-boot-starter:3.35.0'
+    implementation 'io.micrometer:micrometer-core'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

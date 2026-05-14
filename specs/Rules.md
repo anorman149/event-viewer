@@ -1,8 +1,68 @@
-# Project Rules
+# Platform Rules
 
-Standards that apply to every file in this repository. Follow these without exception unless explicitly overridden in a spec.
+Mandatory conventions that apply to every module, phase, and pull request in this repository. These rules override defaults and must not be regressed.
 
 ---
+
+## Rule: Metric Names Use Dot Notation
+
+All Micrometer metric names must use `.` (dot) as the word separator — never `_` (underscore).
+
+**Correct:**
+```java
+Counter.builder("leader.election.acquisitions").register(registry);
+Gauge.builder("kafka.consumer.lag", ...).register(registry);
+Timer.builder("leader.aware.scheduler.execution").register(registry);
+```
+
+**Incorrect:**
+```java
+Counter.builder("leader_election_acquisitions_total").register(registry);
+```
+
+**Rationale:** Micrometer converts dots to underscores automatically when exporting to Prometheus. Writing underscores in code bypasses that normalization and produces double-underscore artifacts. Dot notation is the Micrometer-native convention and works correctly across all registry types (Prometheus, Datadog, InfluxDB, etc.).
+
+**Notes:**
+- Do not append `_total`, `_count`, or `_sum` to counter or timer names in code — these suffixes are added by the exporting registry.
+- Tag keys and values are not affected by this rule; use whatever format the consuming system expects.
+- This rule applies to `Counter`, `Gauge`, `Timer`, `DistributionSummary`, and `@Timed` / `@Counted` annotations.
+
+---
+
+## Rule: Tests Must Assert Deterministic Behavior — Not Metrics or Actuator Endpoints
+
+Unit tests and integration tests must verify correctness through deterministic functional outputs. Tests must never use Micrometer metrics, Prometheus text output, or Spring Boot Actuator endpoints (`/actuator/prometheus`, `/actuator/metrics`, `/actuator/health`, etc.) as the primary oracle for whether a feature is working correctly.
+
+**Correct — functional assertions:**
+```java
+// Assert the service state directly
+assertTrue(leaderElectionService.isLeader());
+assertEquals(1, leaderElectionService.getFencingToken());
+
+// Assert mock interactions
+verify(adminClient).listConsumerGroupOffsets("event-ingest-group");
+
+// Assert computed values
+assertEquals(10L, computedLag);
+```
+
+**Incorrect — metric-based assertions:**
+```java
+// Do not use the Prometheus endpoint as a test oracle
+String prometheusOutput = restTemplate.getForObject("/actuator/prometheus", String.class);
+assertThat(prometheusOutput).contains("leader_election_is_leader 1.0");
+
+// Do not use the metrics endpoint to check if a feature worked
+Map<?, ?> metrics = restTemplate.getForObject("/actuator/metrics/leader.election.acquisitions", Map.class);
+assertEquals(1.0, metrics.get("measurements[0].value"));
+```
+
+**Rationale:** Metrics are an operational signal, not a correctness oracle. When a test checks `/actuator/prometheus` to see if a counter incremented, it is coupling the test to the metrics pipeline rather than the behavior itself. This produces tests that:
+- Pass even if the underlying behavior is broken but the metric was manually incremented
+- Fail for unrelated reasons (Prometheus registry misconfiguration, actuator auto-configuration changes)
+- Obscure the intent of the test — the assertion says "this metric has this value" rather than "this component did this thing"
+
+**Exceptions:** Dedicated observability tests whose sole purpose is to verify that a specific metric is registered with the correct name and tags may use `MeterRegistry` directly (not the HTTP endpoint). These tests must be clearly labeled as observability tests and must not be the sole validation for a feature.
 
 ## Testing
 

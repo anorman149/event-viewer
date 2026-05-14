@@ -41,7 +41,7 @@ subprojects {
 }
 
 dockerCompose {
-    projectName = 'event-viewer-test-services'
+    projectName = 'event-viewer-test'
     useComposeFiles = ['docker-compose-test.yml']
     waitForTcpPorts = false
 }
@@ -51,12 +51,14 @@ configure(subprojects.findAll { it.path.startsWith(':apps:') }) {
         itest {
             java.srcDir 'src/itest/java'
             resources.srcDir 'src/itest/resources'
-            compileClasspath += sourceSets.test.compileClasspath
-            runtimeClasspath += sourceSets.test.runtimeClasspath
+            compileClasspath += sourceSets.main.output + sourceSets.test.output
+            runtimeClasspath += sourceSets.main.output + sourceSets.test.output
         }
     }
 
     configurations {
+        itestImplementation.extendsFrom implementation
+        itestRuntimeOnly.extendsFrom runtimeOnly
         itestImplementation.extendsFrom testImplementation
         itestRuntimeOnly.extendsFrom testRuntimeOnly
     }

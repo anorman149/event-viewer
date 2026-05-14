@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew itest *)",
+      "Bash(./gradlew test *)"
+    ]
+  }
+}
