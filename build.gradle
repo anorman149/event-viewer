@@ -26,6 +26,7 @@ subprojects {
     dependencyManagement {
         imports {
             mavenBom 'org.springframework.boot:spring-boot-dependencies:3.4.5'
+            mavenBom 'software.amazon.awssdk:bom:2.28.0'
         }
     }
 

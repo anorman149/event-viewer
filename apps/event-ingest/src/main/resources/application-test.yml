@@ -3,6 +3,10 @@ logging:
     root: info
     org.eventviewer: debug
 
+s3:
+  bucket: event-viewer-test
+  endpoint-override: http://localhost:4566
+
 leader-election:
   clustered: false
   # Unique lock name per test context so concurrent Spring contexts don't compete for the same Redis lock.

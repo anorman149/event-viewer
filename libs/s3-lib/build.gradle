@@ -1,2 +1,13 @@
-// Stub — implemented in Phase 2.
-// The java plugin and Spring Boot BOM are applied by the root build.
+dependencies {
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:apache-client'
+    implementation 'com.github.luben:zstd-jni:1.5.6-1'
+    implementation 'io.github.resilience4j:resilience4j-retry:2.2.0'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation 'org.springframework:spring-context'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'org.slf4j:slf4j-api'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

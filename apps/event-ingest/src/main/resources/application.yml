@@ -91,6 +91,15 @@ leader-election:
   host: redis://localhost:6379
   password: placeholder
 
+s3:
+  bucket: ${S3_BUCKET:event-viewer-local}
+  region: ${S3_REGION:us-east-1}
+  prefix: events
+  endpoint-override: ${S3_ENDPOINT_OVERRIDE:http://localhost:4566}
+  connection-pool-size: 50
+  request-timeout-ms: 5000
+  max-retries: 3
+
 event-ingest:
   kafka:
     topics:
