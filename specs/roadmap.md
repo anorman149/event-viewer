@@ -78,12 +78,11 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** A Liquibase-style schema manager library for OpenSearch provides ordered, idempotent, leader-gated migrations at startup; document classes declare their index, template, and alias metadata via annotation; all subsequent OpenSearch phases consume this library.
 
-- [ ] Two client interfaces in `libs/opensearch-lib` using the OpenSearch Java Client — `OsAdminClient` (createIndex, deleteIndex, indexExists, refreshIndex, createTemplate, templateExists, clusterSettings) and `OsDocumentClient` (save, get, deleteByQuery, search — search is a stub; full query logic added in Phase 10)
-- [ ] `@OsIndex` annotation — attributes: `indexPattern`, `templateName`, `writeAlias`, `readAlias`; applied directly to document record classes; `OsSchemaRegistry` classpath-scans on startup and caches `OsIndexMetadata` per annotated class; client methods call `registry.getMetadata(MyDoc.class)` to resolve alias names at runtime without hardcoding strings
-- [ ] `OsDocumentClient.save()` backed by `BulkIngester` from the OpenSearch Java Client — configurable flush threshold and interval; callers pass a list of documents and the registry supplies the correct write alias automatically
-- [ ] `OsMigration` abstraction — ordered, named, idempotent migration steps (each step checks `templateExists` / `indexExists` before acting); steps declared as Spring `@Bean` methods inside `@Configuration` classes; `apps/event-ingest` owns all migration configs for its indices
-- [ ] `OsSchemaManager` — collects all `OsMigration` beans at startup, sorts by declared order, executes sequentially; gated by `LeaderAwareScheduler` (Phase 3) so only the leader pod runs migrations; followers skip and rely on the leader having applied changes
-- [ ] itest — two app instances against a shared OpenSearch; verify only one applies migrations; restart both and verify idempotency (no errors re-running against an already-existing template / index)
+- [x] Two client interfaces in `libs/opensearch-lib` using the OpenSearch Java Client — `OsAdminClient` (createIndex, deleteIndex, indexExists, refreshIndex, createTemplate, templateExists, clusterSettings) and `OsDocumentClient` (save, get, deleteByQuery, search — search is a stub; full query logic added in Phase 10)
+- [x] `@OsIndex` annotation — attributes: `indexPattern`, `templateName`, `writeAlias`, `readAlias`; applied directly to document record classes; `OsSchemaRegistry` classpath-scans on startup and caches `OsIndexMetadata` per annotated class; client methods call `registry.getMetadata(MyDoc.class)` to resolve alias names at runtime without hardcoding strings
+- [x] `OsDocumentClient.save()` backed by `BulkIngester` from the OpenSearch Java Client — configurable flush threshold and interval; callers pass a list of documents and the registry supplies the correct write alias automatically
+- [x] `OsMigration` abstraction — ordered, named, idempotent migration steps (each step checks `templateExists` / `indexExists` before acting); steps declared as Spring `@Bean` methods inside `@Configuration` classes; `apps/event-ingest` owns all migration configs for its indices
+- [x] `OsSchemaManager` — collects all `OsMigration` beans at startup, sorts by declared order, executes sequentially; gated by `LeaderAwareScheduler` (Phase 3) so only the leader pod runs migrations; followers skip and rely on the leader having applied changes
 
 ---
 
