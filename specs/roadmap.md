@@ -61,17 +61,16 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ## Phase 5 — S3 Storage
 
-**Goal:** Events are flushed as individually ZSTD-compressed records in Hive-partitioned batch files to S3 with full performance tuning, per-event byte-range tracking, and production-grade security.
+**Goal:** A clean, Spring-integrated S3 abstraction layer in `libs/s3-lib` provides context-aware get, create, and delete operations with Step Builder patterns and Autoconfiguration; events are stored as individually ZSTD-compressed records under Hive-partitioned keys.
 
-- [ ] `HiveKeyBuilder` in `libs/s3-lib` — constructs `events/year=YYYY/month=MM/day=DD/hour=HH/schema_type=<type>/pod=<pod>/<uuid>.zst` from partition params; pod name injected from `MY_POD_NAME` env var
-- [ ] Per-event ZSTD compression — each event is individually compressed (ZSTD level-3) and appended to the S3 object; the file is a flat sequence of independently-compressed blobs, not a single compressed stream; per-event compressed byte offset and length are recorded at write time so a GET Range can retrieve and decompress exactly one event without reading the rest of the file
-- [ ] `S3BatchWriter` — writes one Kafka consumer batch directly to S3 with no additional buffering layer; batch size is whatever Kafka delivers (up to `max.poll.records` — if Kafka returns 20 events, 20 events are written immediately, no waiting); returns `S3BatchResult` (s3Key, List of per-event compressed byte offsets + lengths, total compressed/uncompressed sizes)
-- [ ] `S3RangeReader` — accepts `List<S3EventKey>` (each entry: s3Key, byteOffset, byteLength); spawns one virtual thread per entry to execute parallel GET Range calls; each thread decompresses its individually-compressed event blob independently; no shared thread pool — virtual threads are created per invocation and are naturally bounded by the caller's list size
-- [ ] `Event Read` REST API `loadEvents` parameter — boolean query parameter (default `false`); when `true`, pagination is hard-capped at 25 results per page and raw event payloads are fetched from S3 via `S3RangeReader` (capping to 25 bounds the maximum virtual thread count per request); when `false`, only OpenSearch metadata is returned with no S3 calls
-- [ ] AWS S3 client config — connection pool size, request timeout, retry strategy (SDK default + Resilience4J); transfer manager for multipart upload on batches above a configurable size threshold
-- [ ] Security — IAM role / instance profile in prod; LocalStack dummy credentials (`AWS_ACCESS_KEY_ID=test`) in dev; credentials never committed; S3 bucket policy enforces server-side encryption at rest
-- [ ] `DistributionSummary` for batch event count, compressed bytes, uncompressed bytes; `@Timed(histogram=true)` on `S3BatchWriter.flush()` and `S3RangeReader.fetch()`; `Counter` for flush count, S3 PUT failures, S3 GET Range calls
-- [ ] Unit tests (mock S3 client) + itest against LocalStack: flush a Kafka-batch-sized set of events (varying sizes), verify object exists, verify per-event byte offsets correct, verify each event independently decompressible by range
+- [x] `HiveKeyBuilder` in `libs/s3-lib` — constructs `events/year=YYYY/month=MM/day=DD/hour=HH/pod=<pod>/<uuid>.zst` from partition params; pod name injected from `MY_POD_NAME` env var
+- [x] `S3Client` in `libs/s3-lib` — single abstraction over the AWS S3 SDK; context holds bucket, region, and prefix; exposes three operations: `get`, `create`, `delete`; each operation uses a Step Builder pattern to guide callers through required parameters (e.g., `s3Client.create().key(hiveKey).body(bytes).execute()`); no leaky SDK types in public return values
+- [x] Per-event ZSTD compression — each event is individually compressed (ZSTD level-3) before being passed to `S3Client.create()`; the stored file is a flat sequence of independently-compressed blobs; per-event compressed byte offset and length are tracked so `S3Client.get()` can retrieve and decompress exactly one event via byte-range without reading the full file
+- [x] Spring Autoconfiguration — `S3AutoConfiguration` in `libs/s3-lib` configures an `S3Client` bean from `S3Properties` (`s3.bucket`, `s3.region`, `s3.prefix`, `s3.endpoint-override` for LocalStack); wired via `AutoConfiguration.imports` so any app adding the dependency gets the bean automatically; connection pool size, request timeout, and retry strategy (SDK default + Resilience4J) configurable via `S3Properties`
+- [x] `S3BucketInitializer` in `libs/s3-lib` — `SmartLifecycle` bean wired by `S3AutoConfiguration`; applies a 5-day object expiry lifecycle rule (`PutBucketLifecycleConfiguration`) to the events prefix on startup; idempotent; aligns S3 retention with OpenSearch metadata TTL
+- [x] Security — IAM role / instance profile in prod; LocalStack dummy credentials (`AWS_ACCESS_KEY_ID=test`) in dev; credentials never committed; S3 bucket policy enforces server-side encryption at rest
+- [x] `@Timed(histogram=true)` on `S3Client.create()`, `S3Client.get()`, and `S3Client.delete()`; `DistributionSummary` for bytes written and bytes read; `Counter` for S3 PUT failures, S3 GET failures, and total operations
+- [x] Unit tests (mock S3 client) + itest against LocalStack: write ZSTD-compressed events, verify object exists, verify per-event byte offsets are correct, verify each event is independently decompressible via byte-range get
 
 ---
 
@@ -264,7 +263,7 @@ Phase 1 (Skeleton)
   └─ Phase 2 (Kafka Ingest: topic + REST endpoint)
        └─ Phase 3 (Leader Election: Redis lock, LeaderAwareScheduler, KafkaLagMonitor)
             └─ Phase 4 (Kafka Consumer: batch listener, SASL, manual ack, retry/DLT)
-                 └─ Phase 5 (S3 Storage: per-event ZSTD, Hive keys, virtual-thread GET Range)
+                 └─ Phase 5 (S3 Storage: S3Client abstraction, Autoconfiguration, Step Builders, ZSTD, Hive keys)
                  └─ Phase 6 (OpenSearch Schema Manager: OsAdminClient, OsDocumentClient, @OsIndex, OsSchemaManager) ← also needs Phase 3
                       └─ Phase 7 (OpenSearch Storage: EventDocument, ILM hot→UltraWarm, aliases, BulkIngester)
                            └─ Phase 8 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)

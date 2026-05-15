@@ -3,7 +3,10 @@
     "allow": [
       "Bash(./gradlew itest *)",
       "Bash(./gradlew test *)",
-      "Bash(./gradlew :apps*)"
+      "Bash(./gradlew :apps*)",
+      "Bash(./gradlew :libs*)",
+      "Bash(./gradlew.bat :apps*)",
+      "Bash(./gradlew.bat :libs*)"
     ]
   }
 }
