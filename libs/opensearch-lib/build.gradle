@@ -1,2 +1,22 @@
-// Stub — implemented in Phase 2.
-// The java plugin and Spring Boot BOM are applied by the root build.
+// ClassGraph 4.8.x doesn't support Java 25 class file format (major version 69).
+// Compile opensearch-lib to Java 21 bytecode via deprecated -source/-target flags
+// (not --release, which Gradle intercepts for JVM attribute resolution).
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-source', '21', '-target', '21']
+}
+
+dependencies {
+    implementation 'org.opensearch.client:opensearch-java:3.6.0'
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
+    implementation 'org.apache.httpcomponents.core5:httpcore5'
+    implementation 'io.github.classgraph:classgraph:4.8.184'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation 'org.springframework:spring-context'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'org.slf4j:slf4j-api'
+    implementation project(':libs:leader')
+    implementation project(':libs:common')
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
