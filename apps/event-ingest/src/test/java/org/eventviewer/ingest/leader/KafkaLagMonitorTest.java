@@ -46,6 +46,7 @@ class KafkaLagMonitorTest {
 
         EventKafkaProperties eventKafkaProperties = new EventKafkaProperties(
                 List.of(),
+                List.of(),
                 new EventKafkaProperties.LagMonitor(true, 60_000L, List.of("event-ingest-group")));
 
         monitor = new KafkaLagMonitor(adminClient, scheduler, registry, eventKafkaProperties);

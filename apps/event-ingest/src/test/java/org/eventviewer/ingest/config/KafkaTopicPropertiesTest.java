@@ -14,9 +14,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "event-ingest.kafka.topics[0].name=event-raw-1",
         "event-ingest.kafka.topics[0].partitions=2",
         "event-ingest.kafka.topics[0].replication-factor=1",
-        "event-ingest.kafka.topics[0].dead-letter.name=event-raw-1.DLT",
-        "event-ingest.kafka.topics[0].dead-letter.partitions=1",
-        "event-ingest.kafka.topics[0].dead-letter.replication-factor=1",
+        "event-ingest.kafka.dead-letter-topics[0].name=event-raw-1.DLT",
+        "event-ingest.kafka.dead-letter-topics[0].partitions=1",
+        "event-ingest.kafka.dead-letter-topics[0].replication-factor=1",
         "event-ingest.kafka.lag-monitor.enabled=true",
         "event-ingest.kafka.lag-monitor.interval-ms=60000",
         "event-ingest.kafka.lag-monitor.consumer-group-ids=event-ingest-group",
@@ -39,8 +39,8 @@ class KafkaTopicPropertiesTest {
     }
 
     @Test
-    void bindsDeadLetterFields() {
-        var dlt = properties.topics().get(0).deadLetter();
+    void bindsDeadLetterTopicFields() {
+        var dlt = properties.deadLetterTopics().get(0);
         assertThat(dlt).isNotNull();
         assertThat(dlt.name()).isEqualTo("event-raw-1.DLT");
         assertThat(dlt.partitions()).isEqualTo(1);

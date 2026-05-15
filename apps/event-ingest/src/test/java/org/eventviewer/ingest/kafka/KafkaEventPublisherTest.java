@@ -42,14 +42,15 @@ class KafkaEventPublisherTest {
                 .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
         EventKafkaProperties eventKafkaProperties = new EventKafkaProperties(
                 List.of(
-                        new EventKafkaProperties.TopicDefinition("event-raw-1", 2, 1,
-                                new EventKafkaProperties.TopicDefinition.DeadLetter("event-raw-1.DLT", 1, 1)),
-                        new EventKafkaProperties.TopicDefinition("event-raw-2", 2, 1,
-                                new EventKafkaProperties.TopicDefinition.DeadLetter("event-raw-2.DLT", 1, 1)),
-                        new EventKafkaProperties.TopicDefinition("event-raw-3", 2, 1,
-                                new EventKafkaProperties.TopicDefinition.DeadLetter("event-raw-3.DLT", 1, 1)),
-                        new EventKafkaProperties.TopicDefinition("event-raw-4", 2, 1,
-                                new EventKafkaProperties.TopicDefinition.DeadLetter("event-raw-4.DLT", 1, 1))),
+                        new EventKafkaProperties.TopicDefinition("event-raw-1", 2, 1),
+                        new EventKafkaProperties.TopicDefinition("event-raw-2", 2, 1),
+                        new EventKafkaProperties.TopicDefinition("event-raw-3", 2, 1),
+                        new EventKafkaProperties.TopicDefinition("event-raw-4", 2, 1)),
+                List.of(
+                        new EventKafkaProperties.DltTopicDefinition("event-raw-1.DLT", 1, 1),
+                        new EventKafkaProperties.DltTopicDefinition("event-raw-2.DLT", 1, 1),
+                        new EventKafkaProperties.DltTopicDefinition("event-raw-3.DLT", 1, 1),
+                        new EventKafkaProperties.DltTopicDefinition("event-raw-4.DLT", 1, 1)),
                 new EventKafkaProperties.LagMonitor(false, 60_000L, List.of()));
         publisher = new KafkaEventPublisher(kafkaTemplate, objectMapper, new SimpleMeterRegistry(), eventKafkaProperties);
     }

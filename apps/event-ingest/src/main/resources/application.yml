@@ -106,31 +106,28 @@ event-ingest:
       - name: event-raw-1
         partitions: 2
         replication-factor: 1
-        dead-letter:
-          name: event-raw-1.DLT
-          partitions: 2
-          replication-factor: 1
       - name: event-raw-2
         partitions: 2
         replication-factor: 1
-        dead-letter:
-          name: event-raw-2.DLT
-          partitions: 2
-          replication-factor: 1
       - name: event-raw-3
         partitions: 2
         replication-factor: 1
-        dead-letter:
-          name: event-raw-3.DLT
-          partitions: 2
-          replication-factor: 1
       - name: event-raw-4
         partitions: 2
         replication-factor: 1
-        dead-letter:
-          name: event-raw-4.DLT
-          partitions: 2
-          replication-factor: 1
+    dead-letter-topics:
+      - name: event-raw-1.DLT
+        partitions: 2
+        replication-factor: 1
+      - name: event-raw-2.DLT
+        partitions: 2
+        replication-factor: 1
+      - name: event-raw-3.DLT
+        partitions: 2
+        replication-factor: 1
+      - name: event-raw-4.DLT
+        partitions: 2
+        replication-factor: 1
     lag-monitor:
       enabled: true
       interval-ms: 60000

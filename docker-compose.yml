@@ -93,6 +93,8 @@ services:
       SERVICES: s3
       AWS_DEFAULT_REGION: us-east-1
       DEBUG: "0"
+      AWS_ACCESS_KEY_ID: localstack
+      AWS_SECRET_ACCESS_KEY: localstack
     volumes:
       - localstack-data:/var/lib/localstack
       - ./infra/localstack/init:/etc/localstack/init/ready.d

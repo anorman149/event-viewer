@@ -35,10 +35,10 @@ import java.util.Properties;
 public class KafkaConsumerConfig implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(KafkaConsumerConfig.class);
 
-    private final List<ConcurrentMessageListenerContainer<String, String>> containers;
-    private final EventConsumerProperties consumerProperties;
-    private final EventKafkaProperties eventKafkaProperties;
-    private final KafkaProperties kafkaProperties;
+    private final ConcurrentMessageListenerContainer<String, String> mainContainer;
+    private final ConcurrentMessageListenerContainer<String, String> dltContainer;
+    private final List<String> mainTopics;
+    private final List<String> dltTopics;
     private volatile boolean running = false;
 
     public KafkaConsumerConfig(
@@ -50,25 +50,31 @@ public class KafkaConsumerConfig implements SmartLifecycle {
             KafkaTemplate<String, String> kafkaTemplate,
             MeterRegistry meterRegistry,
             KafkaProperties kafkaProperties) {
-        this.consumerProperties = consumerProperties;
-        this.eventKafkaProperties = eventKafkaProperties;
-        this.kafkaProperties = kafkaProperties;
 
         Counter dltExhaustedCounter = Counter.builder("dlt.exhausted")
                 .description("DLT events that exhausted all retry attempts")
                 .register(meterRegistry);
 
-        List<ConcurrentMessageListenerContainer<String, String>> list = new ArrayList<>();
-        for (EventKafkaProperties.TopicDefinition topic : eventKafkaProperties.topics()) {
-            list.add(createMainContainer(topic.name(), consumerFactory, eventBatchListener, kafkaTemplate));
+        this.mainTopics = eventKafkaProperties.topics().stream()
+                .map(EventKafkaProperties.TopicDefinition::name)
+                .toList();
+        this.dltTopics = eventKafkaProperties.deadLetterTopics().stream()
+                .map(EventKafkaProperties.DltTopicDefinition::name)
+                .toList();
 
-            if (topic.deadLetter() != null) {
-                list.add(createDltContainer(
-                        topic.deadLetter().name(), consumerProperties,
-                        consumerFactory, dltBatchMessageListener, dltExhaustedCounter));
-            }
-        }
-        this.containers = List.copyOf(list);
+        int mainTotalPartitions = eventKafkaProperties.topics().stream()
+                .mapToInt(EventKafkaProperties.TopicDefinition::partitions)
+                .sum();
+        int dltTotalPartitions = eventKafkaProperties.deadLetterTopics().stream()
+                .mapToInt(EventKafkaProperties.DltTopicDefinition::partitions)
+                .sum();
+
+        this.mainContainer = createMainContainer(
+                mainTopics, mainTotalPartitions, consumerProperties,
+                consumerFactory, eventBatchListener, kafkaTemplate, kafkaProperties);
+        this.dltContainer = createDltContainer(
+                dltTopics, dltTotalPartitions, consumerProperties,
+                consumerFactory, dltBatchMessageListener, dltExhaustedCounter, kafkaProperties);
     }
 
     @Bean
@@ -84,25 +90,31 @@ public class KafkaConsumerConfig implements SmartLifecycle {
                     .partitions(def.partitions())
                     .replicas(def.replicationFactor())
                     .build());
-            if (def.deadLetter() != null) {
-                topics.add(TopicBuilder.name(def.deadLetter().name())
-                        .partitions(def.deadLetter().partitions())
-                        .replicas(def.deadLetter().replicationFactor())
-                        .build());
-            }
+        }
+        for (EventKafkaProperties.DltTopicDefinition def : properties.deadLetterTopics()) {
+            topics.add(TopicBuilder.name(def.name())
+                    .partitions(def.partitions())
+                    .replicas(def.replicationFactor())
+                    .build());
         }
         return new KafkaAdmin.NewTopics(topics.toArray(new NewTopic[0]));
     }
 
     private ConcurrentMessageListenerContainer<String, String> createMainContainer(
-            String topic,
+            List<String> topics,
+            int totalPartitions,
+            EventConsumerProperties consumerProperties,
             ConsumerFactory<String, String> consumerFactory,
             EventBatchListener listener,
-            KafkaTemplate<String, String> kafkaTemplate) {
+            KafkaTemplate<String, String> kafkaTemplate,
+            KafkaProperties kafkaProperties) {
 
-        ContainerProperties containerProps = new ContainerProperties(topic);
-        containerProps.setAckMode(kafkaProperties.getListener().getAckMode());
+        ContainerProperties containerProps = new ContainerProperties(topics.toArray(new String[0]));
         containerProps.setMessageListener(listener);
+        containerProps.setAckMode(kafkaProperties.getListener().getAckMode());
+        containerProps.setMicrometerEnabled(true);
+        containerProps.setClientId(kafkaProperties.getClientId());
+        containerProps.setGroupId(kafkaProperties.getConsumer().getGroupId());
 
         // 3 retries: backoffs 1 s → 2 s → 4 s; failures beyond that route to {topic}.DLT
         ExponentialBackOff backOff = new ExponentialBackOff(1_000L, 2.0);
@@ -111,30 +123,33 @@ public class KafkaConsumerConfig implements SmartLifecycle {
                 new DeadLetterPublishingRecoverer(kafkaTemplate), backOff);
         errorHandler.addNotRetryableExceptions(JsonProcessingException.class);
 
-        int partitions = eventKafkaProperties.topics().stream().findFirst().get().partitions();
-
         ConcurrentMessageListenerContainer<String, String> container =
                 new ConcurrentMessageListenerContainer<>(consumerFactory, containerProps);
-        container.setConcurrency(concurrency(partitions, consumerProperties.podCount()));
+        container.setConcurrency(concurrency(totalPartitions, consumerProperties.podCount()));
         container.setCommonErrorHandler(errorHandler);
-        container.setBeanName("consumer-" + topic);
+        container.setBeanName("main-consumer");
         return container;
     }
 
     private ConcurrentMessageListenerContainer<String, String> createDltContainer(
-            String dltTopic,
+            List<String> dltTopics,
+            int totalPartitions,
             EventConsumerProperties consumerProperties,
             ConsumerFactory<String, String> consumerFactory,
             DltBatchMessageListener dltListener,
-            Counter dltExhaustedCounter) {
+            Counter dltExhaustedCounter,
+            KafkaProperties kafkaProperties) {
 
-        ContainerProperties containerProps = new ContainerProperties(dltTopic);
+        ContainerProperties containerProps = new ContainerProperties(dltTopics.toArray(new String[0]));
         containerProps.setAckMode(kafkaProperties.getListener().getAckMode());
+        containerProps.setMicrometerEnabled(true);
+        containerProps.setClientId(kafkaProperties.getClientId() + "-dlt");
+        containerProps.setGroupId(kafkaProperties.getConsumer().getGroupId() + "-dlt");
         containerProps.setMessageListener(dltListener);
 
         Properties overrides = new Properties();
         overrides.setProperty(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG,
-                consumerProperties.podName() + "-" + dltTopic);
+                consumerProperties.podName() + "-dlt");
         containerProps.setKafkaConsumerProperties(overrides);
 
         // 100 retries at 5 s fixed; on exhaustion meter and skip
@@ -147,26 +162,27 @@ public class KafkaConsumerConfig implements SmartLifecycle {
                 },
                 backOff);
 
-        int partitions = eventKafkaProperties.topics().stream().findFirst().get().partitions();
-
         ConcurrentMessageListenerContainer<String, String> container =
                 new ConcurrentMessageListenerContainer<>(consumerFactory, containerProps);
-        container.setConcurrency(concurrency(partitions, consumerProperties.podCount()));
+        container.setConcurrency(concurrency(totalPartitions, consumerProperties.podCount()));
         container.setCommonErrorHandler(errorHandler);
-        container.setBeanName("dlt-consumer-" + dltTopic);
+        container.setBeanName("dlt-consumer");
         return container;
     }
 
     @Override
     public void start() {
-        containers.forEach(ConcurrentMessageListenerContainer::start);
+        mainContainer.start();
+        dltContainer.start();
         running = true;
-        log.info("Started {} Kafka consumer containers", containers.size());
+        log.info("Started main consumer container supporting topics: {}", mainTopics);
+        log.info("Started DLT consumer container supporting topics: {}", dltTopics);
     }
 
     @Override
     public void stop() {
-        containers.forEach(ConcurrentMessageListenerContainer::stop);
+        mainContainer.stop();
+        dltContainer.stop();
         running = false;
     }
 
