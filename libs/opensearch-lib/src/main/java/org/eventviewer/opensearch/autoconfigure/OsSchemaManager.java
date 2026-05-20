@@ -76,6 +76,9 @@ public class OsSchemaManager implements LeaderListener {
 
             log.info("Applying migration order={} name={}", latest.order(), latest.name());
             for (MigrationData data : latest.data()) {
+                if (data.getIlmPolicySettings() != null) {
+                    adminClient.putIlmPolicy(data.getIlmPolicySettings());
+                }
                 if (data.getIndexSettings() != null) {
                     if (!adminClient.templateExists(data.getIndexSettings().getEntity())) {
                         adminClient.createTemplate(data.getIndexSettings());

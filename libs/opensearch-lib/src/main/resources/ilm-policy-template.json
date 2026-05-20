@@ -1,0 +1,27 @@
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_size": "{MAX_SIZE_GB}gb",
+            "max_age": "{MAX_AGE}"
+          }
+        }
+      },
+      "warm": {
+        "min_age": "0ms",
+        "actions": {
+          "migrate": {}
+        }
+      },
+      "delete": {
+        "min_age": "{WARM_MIN}",
+        "actions": {
+          "delete": {}
+        }
+      }
+    }
+  }
+}

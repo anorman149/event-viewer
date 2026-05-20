@@ -100,6 +100,12 @@ s3:
   request-timeout-ms: 5000
   max-retries: 3
 
+opensearch:
+  host: localhost
+  port: 9200
+  index:
+    replicas: 0
+
 event-ingest:
   kafka:
     topics:

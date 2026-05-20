@@ -4,7 +4,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.annotation.Timed;
 import org.eventviewer.api.ingest.KafkaEventMessage;
-import org.eventviewer.s3.CreateResult;
+import org.eventviewer.ingest.config.EventConsumerProperties;
+import org.eventviewer.ingest.domain.EventCoordinates;
+import org.eventviewer.ingest.domain.EventDocument;
+import org.eventviewer.opensearch.OsDocumentClient;
+import org.eventviewer.opensearch.OsException;
 import org.eventviewer.s3.HiveKeyBuilder;
 import org.eventviewer.s3.S3Client;
 import org.eventviewer.s3.ZstdCodec;
@@ -16,7 +20,10 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class IngestPipelineService {
@@ -27,15 +34,21 @@ public class IngestPipelineService {
     private final HiveKeyBuilder hiveKeyBuilder;
     private final ZstdCodec zstdCodec;
     private final ObjectMapper objectMapper;
+    private final OsDocumentClient osDocumentClient;
+    private final String podId;
 
     public IngestPipelineService(S3Client s3Client,
                                   HiveKeyBuilder hiveKeyBuilder,
                                   ZstdCodec zstdCodec,
-                                  ObjectMapper objectMapper) {
+                                  ObjectMapper objectMapper,
+                                  OsDocumentClient osDocumentClient,
+                                  EventConsumerProperties consumerProperties) {
         this.s3Client = s3Client;
         this.hiveKeyBuilder = hiveKeyBuilder;
         this.zstdCodec = zstdCodec;
         this.objectMapper = objectMapper;
+        this.osDocumentClient = osDocumentClient;
+        this.podId = consumerProperties.podName();
     }
 
     @Timed(value = "event.ingest.pipeline.process",
@@ -51,12 +64,36 @@ public class IngestPipelineService {
             blobs.add(serializeAndCompress(event));
         }
 
-        byte[] body = concatenate(blobs);
         Instant timestamp = resolveTimestamp(messages);
         String key = hiveKeyBuilder.buildKey(timestamp);
+        String s3FileName = key.substring(key.lastIndexOf('/') + 1);
 
-        CreateResult result = s3Client.create().key(key).body(body).execute();
+        Map<UUID, EventCoordinates> coordinates = concatenate(messages, blobs, s3FileName, podId);
+
+        byte[] body = concatBytes(blobs);
+        var result = s3Client.create().key(key).body(body).execute();
         log.debug("Wrote {} events ({} bytes) to S3 key {}", messages.size(), result.bytesWritten(), key);
+
+        List<EventDocument> eventDocuments = new ArrayList<>(messages.size());
+        for (KafkaEventMessage event : messages) {
+            EventCoordinates coord = coordinates.get(event.eventId());
+            eventDocuments.add(new EventDocument(
+                    coord.eventId().toString(),
+                    event.schemaType(),
+                    coord.timestamp(),
+                    coord.s3FileName(),
+                    coord.podId(),
+                    coord.batchOffset(),
+                    coord.batchLength(),
+                    List.of()
+            ));
+        }
+
+        try {
+            osDocumentClient.save(eventDocuments);
+        } catch (OsException e) {
+            log.error("Failed to index {} event documents to OpenSearch: {}", eventDocuments.size(), e.getMessage(), e);
+        }
     }
 
     /**
@@ -77,7 +114,19 @@ public class IngestPipelineService {
         }
     }
 
-    private byte[] concatenate(List<byte[]> blobs) {
+    private Map<UUID, EventCoordinates> concatenate(List<KafkaEventMessage> messages, List<byte[]> blobs, String s3FileName, String podId) {
+        Map<UUID, EventCoordinates> result = new LinkedHashMap<>(messages.size());
+        long position = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            KafkaEventMessage event = messages.get(i);
+            int length = blobs.get(i).length;
+            result.put(event.eventId(), new EventCoordinates(event.eventId(), event.timestamp(), s3FileName, podId, position, length));
+            position += length;
+        }
+        return result;
+    }
+
+    private byte[] concatBytes(List<byte[]> blobs) {
         int totalCapacity = blobs.stream().mapToInt(b -> b.length).sum();
         ByteBuffer buffer = ByteBuffer.allocate(totalCapacity);
         blobs.forEach(buffer::put);

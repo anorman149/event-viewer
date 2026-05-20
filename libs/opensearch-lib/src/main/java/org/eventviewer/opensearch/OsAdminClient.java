@@ -15,4 +15,6 @@ public interface OsAdminClient {
     <T> boolean templateExists(Class<T> clazz) throws OsException;
 
     void clusterSettings(ClusterSettings settings) throws OsException;
+
+    void putIlmPolicy(IlmPolicySettings settings) throws OsException;
 }
