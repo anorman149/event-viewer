@@ -193,10 +193,10 @@ class RedissonLeaderElectionServiceTest {
         private final AtomicInteger onLeaderLossCalls = new AtomicInteger(0);
 
         @Override
-        public void onLeader() { onLeaderCalls.incrementAndGet(); }
+        public void onElected() { onLeaderCalls.incrementAndGet(); }
 
         @Override
-        public void onLeaderLoss() { onLeaderLossCalls.incrementAndGet(); }
+        public void onRevoked() { onLeaderLossCalls.incrementAndGet(); }
 
         int onLeaderCallCount() { return onLeaderCalls.get(); }
         int onLeaderLossCallCount() { return onLeaderLossCalls.get(); }

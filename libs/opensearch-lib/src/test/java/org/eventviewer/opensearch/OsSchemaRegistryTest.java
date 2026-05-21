@@ -21,11 +21,11 @@ class OsSchemaRegistryTest {
     void getMetadata_annotatedClass_returnsCorrectMetadata() {
         OsIndexMetadata metadata = registry.getMetadata(TestDocument.class);
 
-        assertThat(metadata.documentClass()).isEqualTo(TestDocument.class);
-        assertThat(metadata.indexPattern()).isEqualTo("<test-events-{now/d}-000001>");
-        assertThat(metadata.templateName()).isEqualTo("test-events-template");
-        assertThat(metadata.writeAlias()).isEqualTo("test_events_write");
-        assertThat(metadata.readAlias()).isEqualTo("test_events_read");
+        assertThat(metadata.getDocumentClass()).isEqualTo(TestDocument.class);
+        assertThat(metadata.getIndexPattern()).isEqualTo("<test-events-{now/d}-000001>");
+        assertThat(metadata.getTemplateName()).isEqualTo("test-events-template");
+        assertThat(metadata.getWriteAlias()).isEqualTo("test_events_write");
+        assertThat(metadata.getReadAlias()).isEqualTo("test_events_read");
     }
 
     @Test

@@ -11,16 +11,12 @@ import org.opensearch.client.opensearch._helpers.bulk.BulkIngester;
 import org.opensearch.client.opensearch._helpers.bulk.BulkListener;
 import org.opensearch.client.opensearch.core.BulkRequest;
 import org.opensearch.client.opensearch.core.BulkResponse;
-import org.opensearch.client.opensearch.core.bulk.BulkOperation;
-import org.opensearch.client.opensearch.generic.Requests;
 import org.opensearch.client.opensearch.indices.ExistsIndexTemplateRequest;
 import org.opensearch.client.transport.BackoffPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +54,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     public <T> void refresh(Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
-            client.indices().refresh(req -> req.index(metadata.writeAlias()));
+            client.indices().refresh(req -> req.index(metadata.getWriteAlias()));
         } catch (IOException e) {
             throw new OsException("Failed to refresh index for " + clazz.getSimpleName(), e);
         }
@@ -68,16 +64,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     @Timed(value = "os.admin.client.index.exists", histogram = true)
     public <T> boolean indexExists(Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
-        return indexExists(metadata.indexPattern());
-    }
-
-    @Override
-    @Timed(value = "os.admin.client.index.exists.by.name", histogram = true)
-    public boolean indexExists(String name) throws OsException {
         try {
-            return client.indices().exists(req -> req.index(name)).value();
+            return client.indices().exists(req -> req.index(metadata.getIndexPattern())).value();
         } catch (IOException e) {
-            throw new OsException("Failed to check index existence for: " + name, e);
+            throw new OsException("Failed to check index existence for: " + metadata.getIndexPattern(), e);
         }
     }
 
@@ -87,10 +77,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         OsIndexMetadata metadata = registry.getMetadata(settings.getEntity());
         try {
             client.indices().create(req -> {
-                var b = req.index(metadata.indexPattern())
+                var b = req.index(metadata.getIndexPattern())
                         .aliases(Map.of(
-                                metadata.writeAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)),
-                                metadata.readAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a)
+                                metadata.getWriteAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)),
+                                metadata.getReadAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a)
                         ))
                         .settings(osIndexSettings(settings));
                 if (settings.getTypeMapping() != null) {
@@ -98,7 +88,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
                 }
                 return b;
             });
-            log.debug("Created index: {}", metadata.indexPattern());
+            log.info("Created index: {}", metadata.getIndexPattern());
         } catch (IOException e) {
             throw new OsException("Failed to create index for " + settings.getEntity().getSimpleName(), e);
         }
@@ -108,25 +98,22 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     @Timed(value = "os.admin.client.create.template", histogram = true)
     public void createTemplate(IndexSettings settings) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(settings.getEntity());
-        String pattern = settings.getTemplatePattern() != null
-                ? settings.getTemplatePattern()
-                : metadata.indexPattern();
         try {
             client.indices().putIndexTemplate(req -> req
-                    .name(metadata.templateName())
-                    .indexPatterns(List.of(pattern))
+                    .name(metadata.getTemplateName())
+                    .indexPatterns(metadata.getIndexPattern())
                     .template(t -> {
                         t.settings(osIndexSettings(settings));
                         if (settings.getTypeMapping() != null) {
                             t.mappings(settings.getTypeMapping());
                         }
-                        t.aliases(metadata.writeAlias(),
+                        t.aliases(metadata.getWriteAlias(),
                                 org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)));
-                        t.aliases(metadata.readAlias(),
+                        t.aliases(metadata.getReadAlias(),
                                 org.opensearch.client.opensearch.indices.Alias.of(a -> a));
                         return t;
                     }));
-            log.debug("Created index template: {}", metadata.templateName());
+            log.info("Created index template: {}", metadata.getTemplateName());
         } catch (IOException e) {
             throw new OsException("Failed to create template for " + settings.getEntity().getSimpleName(), e);
         }
@@ -138,7 +125,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
             return client.indices().existsIndexTemplate(
-                    ExistsIndexTemplateRequest.of(req -> req.name(metadata.templateName()))
+                    ExistsIndexTemplateRequest.of(req -> req.name(metadata.getTemplateName()))
             ).value();
         } catch (IOException e) {
             throw new OsException("Failed to check template existence for " + clazz.getSimpleName(), e);
@@ -153,50 +140,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
             client.cluster().putSettings(req -> req
                     .persistent(Map.of(
                             "search.max_buckets", JsonData.of(settings.getSearchMaxBuckets()),
-                            "search.canceler.after", JsonData.of(cancelerAfter)
+                            "search.cancel_after_time_interval", JsonData.of(cancelerAfter)
                     )));
         } catch (IOException e) {
             throw new OsException("Failed to apply cluster settings", e);
-        }
-    }
-
-    @Override
-    @Timed(value = "os.admin.client.put.ilm.policy", histogram = true)
-    public void putIlmPolicy(IlmPolicySettings settings) throws OsException {
-        String body = buildIlmPolicyJson(settings);
-        try (var response = client.generic().execute(
-                Requests.builder()
-                        .method("PUT")
-                        .endpoint("/_ilm/policy/" + settings.getPolicyName())
-                        .json(body)
-                        .build())) {
-            if (response.getStatus() >= 400) {
-                throw new OsException("ILM policy PUT failed with status " + response.getStatus()
-                        + " for policy: " + settings.getPolicyName());
-            }
-            log.debug("ILM policy applied: {}", settings.getPolicyName());
-        } catch (OsException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new OsException("Failed to create ILM policy: " + settings.getPolicyName(), e);
-        }
-    }
-
-    private String buildIlmPolicyJson(IlmPolicySettings s) throws OsException {
-        String maxAge = s.getRolloverMaxAge().toHours() + "h";
-        String warmMin = s.getWarmRetention().toDays() + "d";
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream("ilm-policy-template.json")) {
-            if (is == null) {
-                throw new OsException("ilm-policy-template.json not found on classpath");
-            }
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8)
-                    .replace("{MAX_SIZE_GB}", String.valueOf(s.getRolloverMaxSizeGb()))
-                    .replace("{MAX_AGE}", maxAge)
-                    .replace("{WARM_MIN}", warmMin);
-        } catch (OsException e) {
-            throw e;
-        } catch (IOException e) {
-            throw new OsException("Failed to load ilm-policy-template.json", e);
         }
     }
 
@@ -209,7 +156,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         try {
             T first = items.iterator().next();
             OsIndexMetadata metadata = registry.getMetadata(first.getClass());
-            String writeAlias = metadata.writeAlias();
+            String writeAlias = metadata.getWriteAlias();
 
             BulkListener<Void> listener = new BulkListener<>() {
                 @Override
@@ -242,7 +189,18 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
 
             for (T item : items) {
                 final T doc = item;
-                ingester.add(BulkOperation.of(op -> op.index(idx -> idx.index(writeAlias).document(doc))));
+                Object idFieldValue = metadata.getIdField().get(doc);
+
+                ingester.add(op -> op.index(i -> {
+                    i.index(writeAlias);
+                    i.document(doc);
+
+                    if(idFieldValue != null) {
+                        i.id(idFieldValue.toString());
+                    }
+
+                    return i;
+                }));
             }
 
             //Close to flush all pending items.
@@ -264,13 +222,13 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     public <T> T get(String id, Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
-            var response = client.get(req -> req.index(metadata.readAlias()).id(id), clazz);
+            var response = client.get(req -> req.index(metadata.getReadAlias()).id(id), clazz);
             if (response == null || !response.found()) {
                 return null;
             }
             return response.source();
         } catch (IOException e) {
-            throw new OsException("Failed to get document id=" + id + " from " + metadata.readAlias(), e);
+            throw new OsException("Failed to get document id=" + id + " from " + metadata.getReadAlias(), e);
         }
     }
 
@@ -296,9 +254,6 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
              .numberOfReplicas(settings.getReplicas())
              .refreshInterval(t -> t.time(settings.getRefreshIntervalSecs() + "s"))
              .codec(settings.getCodec());
-            if (settings.getLifecycleName() != null) {
-                s.lifecycleName(settings.getLifecycleName());
-            }
             return s;
         });
     }

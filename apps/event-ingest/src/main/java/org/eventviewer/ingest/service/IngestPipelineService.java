@@ -79,7 +79,7 @@ public class IngestPipelineService {
             EventCoordinates coord = coordinates.get(event.eventId());
             eventDocuments.add(new EventDocument(
                     coord.eventId().toString(),
-                    event.schemaType(),
+                    0, // TODO: resolve surrogate key from PostgreSQL schema_type table
                     coord.timestamp(),
                     coord.s3FileName(),
                     coord.podId(),

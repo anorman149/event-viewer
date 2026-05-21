@@ -8,6 +8,7 @@ import org.eventviewer.ingest.domain.RuleStatus;
 import org.eventviewer.ingest.service.IngestPipelineService;
 import org.eventviewer.opensearch.OsAdminClient;
 import org.eventviewer.opensearch.OsDocumentClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.opensearch.client.opensearch.generic.Requests;
@@ -22,6 +23,21 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EventStorageIT extends BaseTest {
+
+    @BeforeEach
+    void awaitSchema() throws Exception {
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                JsonNode aliases = getJson("_cat/aliases?format=json");
+                for (JsonNode alias : aliases) {
+                    if ("events_write".equals(alias.path("alias").asText())) return;
+                }
+            } catch (Exception ignored) {}
+            Thread.sleep(500);
+        }
+        throw new AssertionError("events_write alias did not appear within 30s — schema migration did not complete");
+    }
 
     @Autowired
     private IngestPipelineService ingestPipelineService;
@@ -123,7 +139,7 @@ class EventStorageIT extends BaseTest {
         String eventId = UUID.randomUUID().toString();
         EventDocument doc = new EventDocument(
                 eventId,
-                "test-schema",
+                1,
                 Instant.now(),
                 "550e8400-e29b-41d4-a716-446655440000.zst",
                 "local-pod",

@@ -12,12 +12,12 @@ public class RecordingLeaderListener implements LeaderListener {
     private final AtomicInteger onLeaderLossCalls = new AtomicInteger(0);
 
     @Override
-    public void onLeader() {
+    public void onElected() {
         onLeaderCalls.incrementAndGet();
     }
 
     @Override
-    public void onLeaderLoss() {
+    public void onRevoked() {
         onLeaderLossCalls.incrementAndGet();
     }
 

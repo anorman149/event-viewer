@@ -11,7 +11,6 @@ public class OsProperties {
     private String username;
     private String password;
     private Bulk bulk = new Bulk();
-    private Migration migration = new Migration();
 
     public String getHost() { return host; }
     public void setHost(String host) { this.host = host; }
@@ -31,9 +30,6 @@ public class OsProperties {
     public Bulk getBulk() { return bulk; }
     public void setBulk(Bulk bulk) { this.bulk = bulk; }
 
-    public Migration getMigration() { return migration; }
-    public void setMigration(Migration migration) { this.migration = migration; }
-
     public static class Bulk {
         private int flushThreshold = 500;
         private long flushIntervalMs = 5000;
@@ -43,12 +39,5 @@ public class OsProperties {
 
         public long getFlushIntervalMs() { return flushIntervalMs; }
         public void setFlushIntervalMs(long flushIntervalMs) { this.flushIntervalMs = flushIntervalMs; }
-    }
-
-    public static class Migration {
-        private String indexName = "migrations";
-
-        public String getIndexName() { return indexName; }
-        public void setIndexName(String indexName) { this.indexName = indexName; }
     }
 }

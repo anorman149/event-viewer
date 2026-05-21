@@ -3,15 +3,12 @@ package org.eventviewer.opensearch;
 import org.opensearch.client.opensearch._types.mapping.TypeMapping;
 
 public class IndexSettings {
-
     private TypeMapping typeMapping;
     private Class<?> entity;
     private int shards = 1;
     private int replicas = 0;
     private int refreshIntervalSecs = 60;
     private String codec = "default";
-    private String lifecycleName;
-    private String templatePattern;
 
     public TypeMapping getTypeMapping() { return typeMapping; }
     public void setTypeMapping(TypeMapping typeMapping) { this.typeMapping = typeMapping; }
@@ -30,10 +27,4 @@ public class IndexSettings {
 
     public String getCodec() { return codec; }
     public void setCodec(String codec) { this.codec = codec; }
-
-    public String getLifecycleName() { return lifecycleName; }
-    public void setLifecycleName(String lifecycleName) { this.lifecycleName = lifecycleName; }
-
-    public String getTemplatePattern() { return templatePattern; }
-    public void setTemplatePattern(String templatePattern) { this.templatePattern = templatePattern; }
 }

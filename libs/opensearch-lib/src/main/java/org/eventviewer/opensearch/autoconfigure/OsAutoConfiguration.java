@@ -93,10 +93,9 @@ public class OsAutoConfiguration {
 
     @Bean
     public OsSchemaManager osSchemaManager(OsAdminClient adminClient,
-                                            OpenSearchClient openSearchClient,
-                                            OsProperties properties,
+                                           OsDocumentClient osDocumentClient,
                                             List<OsMigration> migrations,
                                             MeterRegistry meterRegistry) {
-        return new OsSchemaManager(adminClient, openSearchClient, properties, migrations, meterRegistry);
+        return new OsSchemaManager(adminClient, osDocumentClient, migrations, meterRegistry);
     }
 }

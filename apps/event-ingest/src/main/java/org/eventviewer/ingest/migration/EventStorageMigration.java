@@ -1,10 +1,7 @@
 package org.eventviewer.ingest.migration;
 
 import org.eventviewer.ingest.domain.EventDocument;
-import org.eventviewer.opensearch.IlmPolicySettings;
-import org.eventviewer.opensearch.IndexSettings;
-import org.eventviewer.opensearch.MigrationData;
-import org.eventviewer.opensearch.OsMigration;
+import org.eventviewer.opensearch.*;
 import org.opensearch.client.opensearch._types.mapping.DynamicMapping;
 import org.opensearch.client.opensearch._types.mapping.TypeMapping;
 
@@ -18,22 +15,20 @@ public abstract class EventStorageMigration implements OsMigration {
     protected abstract int refreshIntervalSecs();
 
     @Override
-    public int order() {
-        return 2;
+    public int version() {
+        return 1;
     }
 
     @Override
-    public String name() {
-        return "002_events_template_ilm_index";
+    public String description() {
+        return "Initial Event Storage Migration";
     }
 
     @Override
     public List<MigrationData> data() {
-        IlmPolicySettings ilm = new IlmPolicySettings();
-        ilm.setPolicyName("events-ilm-policy");
-        ilm.setRolloverMaxSizeGb(130);
-        ilm.setRolloverMaxAge(Duration.ofHours(12));
-        ilm.setWarmRetention(Duration.ofDays(4));
+        ClusterSettings clusterSettings = new ClusterSettings();
+        clusterSettings.setSearchMaxBuckets(10000);
+        clusterSettings.setSearchCancelerAfter(Duration.ofSeconds(30));
 
         TypeMapping mapping = TypeMapping.of(m -> m
                 .dynamic(DynamicMapping.False)
@@ -50,16 +45,14 @@ public abstract class EventStorageMigration implements OsMigration {
 
         IndexSettings indexSettings = new IndexSettings();
         indexSettings.setEntity(EventDocument.class);
-        indexSettings.setTemplatePattern("events-*");
         indexSettings.setShards(shards());
         indexSettings.setReplicas(replicas());
         indexSettings.setRefreshIntervalSecs(refreshIntervalSecs());
-        indexSettings.setLifecycleName("events-ilm-policy");
         indexSettings.setTypeMapping(mapping);
 
         MigrationData data = new MigrationData();
-        data.setIlmPolicySettings(ilm);
         data.setIndexSettings(indexSettings);
+        data.setClusterSettings(clusterSettings);
         return List.of(data);
     }
 }

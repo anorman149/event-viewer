@@ -3,18 +3,19 @@ package org.eventviewer.ingest.domain;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.eventviewer.opensearch.Alias;
 import org.eventviewer.opensearch.OsIndex;
+import org.eventviewer.opensearch.Template;
 
 import java.time.Instant;
 import java.util.List;
 
 @OsIndex(
         indexPattern = "<events-{now/d}-000001>",
-        templateName = "events-template",
+        template = @Template(name = "events-template", pattern = "events-*"),
         alias = @Alias(write = "events_write", read = "events_read")
 )
 public record EventDocument(
         String eventId,
-        String schemaType,
+        int schemaType,
         Instant timestamp,
         String s3FileName,
         String podId,

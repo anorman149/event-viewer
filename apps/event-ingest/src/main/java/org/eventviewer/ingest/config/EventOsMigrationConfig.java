@@ -2,7 +2,6 @@ package org.eventviewer.ingest.config;
 
 import org.eventviewer.ingest.migration.EventStorageMigration;
 import org.eventviewer.ingest.migration.dev.DevEventStorageMigration;
-import org.eventviewer.ingest.migration.EventReplicaMigration;
 import org.eventviewer.ingest.migration.local.LocalEventStorageMigration;
 import org.eventviewer.ingest.migration.prod.ProdEventStorageMigration;
 import org.eventviewer.ingest.migration.staging.StagingEventStorageMigration;
@@ -12,14 +11,8 @@ import org.springframework.context.annotation.Profile;
 
 @Configuration
 public class EventOsMigrationConfig {
-
     @Bean
-    public EventReplicaMigration eventReplicaMigration() {
-        return new EventReplicaMigration();
-    }
-
-    @Bean
-    @Profile({"local", "default"})
+    @Profile({"local", "default", "test"})
     public EventStorageMigration localEventStorageMigration() {
         return new LocalEventStorageMigration();
     }
