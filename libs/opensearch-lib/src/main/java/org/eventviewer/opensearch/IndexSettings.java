@@ -3,7 +3,6 @@ package org.eventviewer.opensearch;
 import org.opensearch.client.opensearch._types.mapping.TypeMapping;
 
 public class IndexSettings {
-
     private TypeMapping typeMapping;
     private Class<?> entity;
     private int shards = 1;

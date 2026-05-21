@@ -1,8 +1,9 @@
 package org.eventviewer.leader;
 
 public interface LeaderListener {
+    void onElected();
 
-    void onLeader();
-
-    void onLeaderLoss();
+    default void onRevoked() {
+        //no-op
+    }
 }

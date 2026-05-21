@@ -1,14 +1,12 @@
 package org.eventviewer.opensearch;
 
-import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Target(ElementType.TYPE)
+@Target({})
 @Retention(RetentionPolicy.RUNTIME)
-public @interface OsIndex {
-    String indexPattern();
-    Template template();
-    Alias alias();
+public @interface Template {
+    String name();
+    String pattern();
 }

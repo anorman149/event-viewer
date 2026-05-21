@@ -11,7 +11,6 @@ import org.opensearch.client.opensearch._helpers.bulk.BulkIngester;
 import org.opensearch.client.opensearch._helpers.bulk.BulkListener;
 import org.opensearch.client.opensearch.core.BulkRequest;
 import org.opensearch.client.opensearch.core.BulkResponse;
-import org.opensearch.client.opensearch.core.bulk.BulkOperation;
 import org.opensearch.client.opensearch.indices.ExistsIndexTemplateRequest;
 import org.opensearch.client.transport.BackoffPolicy;
 import org.slf4j.Logger;
@@ -55,7 +54,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     public <T> void refresh(Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
-            client.indices().refresh(req -> req.index(metadata.writeAlias()));
+            client.indices().refresh(req -> req.index(metadata.getWriteAlias()));
         } catch (IOException e) {
             throw new OsException("Failed to refresh index for " + clazz.getSimpleName(), e);
         }
@@ -65,16 +64,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     @Timed(value = "os.admin.client.index.exists", histogram = true)
     public <T> boolean indexExists(Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
-        return indexExists(metadata.indexPattern());
-    }
-
-    @Override
-    @Timed(value = "os.admin.client.index.exists.by.name", histogram = true)
-    public boolean indexExists(String name) throws OsException {
         try {
-            return client.indices().exists(req -> req.index(name)).value();
+            return client.indices().exists(req -> req.index(metadata.getIndexPattern())).value();
         } catch (IOException e) {
-            throw new OsException("Failed to check index existence for: " + name, e);
+            throw new OsException("Failed to check index existence for: " + metadata.getIndexPattern(), e);
         }
     }
 
@@ -84,10 +77,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         OsIndexMetadata metadata = registry.getMetadata(settings.getEntity());
         try {
             client.indices().create(req -> {
-                var b = req.index(metadata.indexPattern())
+                var b = req.index(metadata.getIndexPattern())
                         .aliases(Map.of(
-                                metadata.writeAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)),
-                                metadata.readAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a)
+                                metadata.getWriteAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)),
+                                metadata.getReadAlias(), org.opensearch.client.opensearch.indices.Alias.of(a -> a)
                         ))
                         .settings(osIndexSettings(settings));
                 if (settings.getTypeMapping() != null) {
@@ -95,7 +88,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
                 }
                 return b;
             });
-            log.debug("Created index: {}", metadata.indexPattern());
+            log.info("Created index: {}", metadata.getIndexPattern());
         } catch (IOException e) {
             throw new OsException("Failed to create index for " + settings.getEntity().getSimpleName(), e);
         }
@@ -107,16 +100,20 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         OsIndexMetadata metadata = registry.getMetadata(settings.getEntity());
         try {
             client.indices().putIndexTemplate(req -> req
-                    .name(metadata.templateName())
-                    .indexPatterns(List.of(metadata.indexPattern()))
+                    .name(metadata.getTemplateName())
+                    .indexPatterns(metadata.getTemplatePattern())
                     .template(t -> {
-                        var tb = t.settings(osIndexSettings(settings));
+                        t.settings(osIndexSettings(settings));
                         if (settings.getTypeMapping() != null) {
-                            tb.mappings(settings.getTypeMapping());
+                            t.mappings(settings.getTypeMapping());
                         }
-                        return tb;
+                        t.aliases(metadata.getWriteAlias(),
+                                org.opensearch.client.opensearch.indices.Alias.of(a -> a.isWriteIndex(true)));
+                        t.aliases(metadata.getReadAlias(),
+                                org.opensearch.client.opensearch.indices.Alias.of(a -> a));
+                        return t;
                     }));
-            log.debug("Created index template: {}", metadata.templateName());
+            log.info("Created index template: {}", metadata.getTemplateName());
         } catch (IOException e) {
             throw new OsException("Failed to create template for " + settings.getEntity().getSimpleName(), e);
         }
@@ -128,7 +125,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
             return client.indices().existsIndexTemplate(
-                    ExistsIndexTemplateRequest.of(req -> req.name(metadata.templateName()))
+                    ExistsIndexTemplateRequest.of(req -> req.name(metadata.getTemplateName()))
             ).value();
         } catch (IOException e) {
             throw new OsException("Failed to check template existence for " + clazz.getSimpleName(), e);
@@ -143,7 +140,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
             client.cluster().putSettings(req -> req
                     .persistent(Map.of(
                             "search.max_buckets", JsonData.of(settings.getSearchMaxBuckets()),
-                            "search.canceler.after", JsonData.of(cancelerAfter)
+                            "search.cancel_after_time_interval", JsonData.of(cancelerAfter)
                     )));
         } catch (IOException e) {
             throw new OsException("Failed to apply cluster settings", e);
@@ -159,7 +156,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         try {
             T first = items.iterator().next();
             OsIndexMetadata metadata = registry.getMetadata(first.getClass());
-            String writeAlias = metadata.writeAlias();
+            String writeAlias = metadata.getWriteAlias();
 
             BulkListener<Void> listener = new BulkListener<>() {
                 @Override
@@ -192,7 +189,18 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
 
             for (T item : items) {
                 final T doc = item;
-                ingester.add(BulkOperation.of(op -> op.index(idx -> idx.index(writeAlias).document(doc))));
+                Object idFieldValue = metadata.getIdField().get(doc);
+
+                ingester.add(op -> op.index(i -> {
+                    i.index(writeAlias);
+                    i.document(doc);
+
+                    if(idFieldValue != null) {
+                        i.id(idFieldValue.toString());
+                    }
+
+                    return i;
+                }));
             }
 
             //Close to flush all pending items.
@@ -214,13 +222,13 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     public <T> T get(String id, Class<T> clazz) throws OsException {
         OsIndexMetadata metadata = registry.getMetadata(clazz);
         try {
-            var response = client.get(req -> req.index(metadata.readAlias()).id(id), clazz);
+            var response = client.get(req -> req.index(metadata.getReadAlias()).id(id), clazz);
             if (response == null || !response.found()) {
                 return null;
             }
             return response.source();
         } catch (IOException e) {
-            throw new OsException("Failed to get document id=" + id + " from " + metadata.readAlias(), e);
+            throw new OsException("Failed to get document id=" + id + " from " + metadata.getReadAlias(), e);
         }
     }
 
@@ -241,10 +249,12 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private org.opensearch.client.opensearch.indices.IndexSettings osIndexSettings(IndexSettings settings) {
-        return org.opensearch.client.opensearch.indices.IndexSettings.of(s -> s
-                .numberOfShards(settings.getShards())
-                .numberOfReplicas(settings.getReplicas())
-                .refreshInterval(t -> t.time(settings.getRefreshIntervalSecs() + "s"))
-                .codec(settings.getCodec()));
+        return org.opensearch.client.opensearch.indices.IndexSettings.of(s -> {
+            s.numberOfShards(settings.getShards())
+             .numberOfReplicas(settings.getReplicas())
+             .refreshInterval(t -> t.time(settings.getRefreshIntervalSecs() + "s"))
+             .codec(settings.getCodec());
+            return s;
+        });
     }
 }

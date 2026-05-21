@@ -6,8 +6,6 @@ public interface OsAdminClient {
 
     <T> boolean indexExists(Class<T> clazz) throws OsException;
 
-    boolean indexExists(String name) throws OsException;
-
     void createIndex(IndexSettings settings) throws OsException;
 
     void createTemplate(IndexSettings settings) throws OsException;

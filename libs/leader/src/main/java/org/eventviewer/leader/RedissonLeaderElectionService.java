@@ -81,7 +81,7 @@ public class RedissonLeaderElectionService implements LeaderElectionService, Dis
                     isLeader.set(true);
                     acquisitionsCounter.increment();
                     log.info("Acquired leadership (fencing token={})", token);
-                    listeners.forEach(LeaderListener::onLeader);
+                    listeners.forEach(LeaderListener::onElected);
 
                     while (lock.isHeldByCurrentThread()
                             && !Thread.currentThread().isInterrupted()
@@ -103,7 +103,7 @@ public class RedissonLeaderElectionService implements LeaderElectionService, Dis
                     if (hadLock) {
                         lock.unlock();
                     }
-                    listeners.forEach(LeaderListener::onLeaderLoss);
+                    listeners.forEach(LeaderListener::onRevoked);
                 } else if (!shuttingDown) {
                     Thread.sleep(properties.getRetryIntervalMs());
                 }
@@ -133,7 +133,7 @@ public class RedissonLeaderElectionService implements LeaderElectionService, Dis
                     log.warn("Failed to unlock during interrupt cleanup: {}", e.getMessage());
                 }
             }
-            listeners.forEach(LeaderListener::onLeaderLoss);
+            listeners.forEach(LeaderListener::onRevoked);
         }
     }
 
@@ -161,7 +161,7 @@ public class RedissonLeaderElectionService implements LeaderElectionService, Dis
             } catch (Exception e) {
                 log.warn("Force unlock failed during destroy: {}", e.getMessage());
             }
-            listeners.forEach(LeaderListener::onLeaderLoss);
+            listeners.forEach(LeaderListener::onRevoked);
         }
     }
 }

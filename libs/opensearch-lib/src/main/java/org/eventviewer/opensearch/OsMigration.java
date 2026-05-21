@@ -4,9 +4,9 @@ import java.util.List;
 
 public interface OsMigration {
 
-    int order();
+    int version();
 
-    String name();
+    String description();
 
     List<MigrationData> data();
 }

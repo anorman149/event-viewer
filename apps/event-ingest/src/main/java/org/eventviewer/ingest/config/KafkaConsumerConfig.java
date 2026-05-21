@@ -63,11 +63,11 @@ public class KafkaConsumerConfig implements SmartLifecycle {
                 .toList();
 
         int mainTotalPartitions = eventKafkaProperties.topics().stream()
-                .mapToInt(EventKafkaProperties.TopicDefinition::partitions)
-                .sum();
+                .findFirst().map(EventKafkaProperties.TopicDefinition::partitions)
+                .orElse(1);
         int dltTotalPartitions = eventKafkaProperties.deadLetterTopics().stream()
-                .mapToInt(EventKafkaProperties.DltTopicDefinition::partitions)
-                .sum();
+                .findFirst().map(EventKafkaProperties.DltTopicDefinition::partitions)
+                .orElse(1);
 
         this.mainContainer = createMainContainer(
                 mainTopics, mainTotalPartitions, consumerProperties,

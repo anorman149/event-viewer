@@ -1,7 +1,6 @@
 package org.eventviewer.opensearch;
 
 public class MigrationData {
-
     private IndexSettings indexSettings;
     private ClusterSettings clusterSettings;
 

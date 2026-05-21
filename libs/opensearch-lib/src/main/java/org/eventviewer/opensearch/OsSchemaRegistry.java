@@ -7,6 +7,7 @@ import io.micrometer.core.annotation.Timed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,18 +26,29 @@ public class OsSchemaRegistry {
                 Class<?> clazz = info.loadClass();
                 OsIndex annotation = clazz.getAnnotation(OsIndex.class);
                 if (annotation == null) continue;
-                OsIndexMetadata metadata = new OsIndexMetadata(
-                        clazz,
-                        annotation.indexPattern(),
-                        annotation.templateName(),
-                        annotation.alias().write(),
-                        annotation.alias().read()
-                );
+
+                OsIndexMetadata metadata = new OsIndexMetadata();
+                metadata.setDocumentClass(clazz);
+                metadata.setIndexPattern(annotation.indexPattern());
+                metadata.setTemplateName(annotation.template().name());
+                metadata.setTemplatePattern(annotation.template().pattern());
+                metadata.setWriteAlias(annotation.alias().write());
+                metadata.setReadAlias(annotation.alias().read());
+
+                for (Field field : clazz.getDeclaredFields()) {
+                    if (field.isAnnotationPresent(Id.class)) {
+                        field.setAccessible(true);
+                        metadata.setIdField(field);
+                        break;
+                    }
+                }
+
                 registry.put(clazz, metadata);
-                log.debug("Registered @OsIndex class: {}", clazz.getName());
+                log.info("Registered @OsIndex class: {}", clazz.getName());
             }
         }
-        log.debug("OsSchemaRegistry initialized with {} entries", registry.size());
+
+        log.info("OsSchemaRegistry initialized with {} entries", registry.size());
     }
 
     @Timed(value = "os.schema.registry.get.metadata", histogram = true)

@@ -1,25 +1,37 @@
 package org.eventviewer.opensearch.autoconfigure;
 
-public class MigrationDocument {
+import org.eventviewer.opensearch.Alias;
+import org.eventviewer.opensearch.Id;
+import org.eventviewer.opensearch.OsIndex;
+import org.eventviewer.opensearch.Template;
 
-    private int version;
-    private String name;
-    private String appliedAt;
+import java.time.ZonedDateTime;
+
+@OsIndex(
+        indexPattern = "migrations",
+        template = @Template(name = "migrations-template", pattern = "migrations-*"),
+        alias = @Alias(write = "migrations_write", read = "migrations_read")
+)
+public class MigrationDocument {
+    @Id
+    private String version;
+
+    private ZonedDateTime timestamp;
 
     public MigrationDocument() {}
-
-    public MigrationDocument(int version, String name, String appliedAt) {
+    public MigrationDocument(String version, ZonedDateTime timestamp) {
         this.version = version;
-        this.name = name;
-        this.appliedAt = appliedAt;
+        this.timestamp = timestamp;
     }
 
-    public int getVersion() { return version; }
-    public void setVersion(int version) { this.version = version; }
+    public String getVersion() { return version; }
+    public void setVersion(String version) { this.version = version; }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public ZonedDateTime getTimestamp() {
+        return timestamp;
+    }
 
-    public String getAppliedAt() { return appliedAt; }
-    public void setAppliedAt(String appliedAt) { this.appliedAt = appliedAt; }
+    public void setTimestamp(ZonedDateTime timestamp) {
+        this.timestamp = timestamp;
+    }
 }
