@@ -101,7 +101,7 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
         try {
             client.indices().putIndexTemplate(req -> req
                     .name(metadata.getTemplateName())
-                    .indexPatterns(metadata.getIndexPattern())
+                    .indexPatterns(metadata.getTemplatePattern())
                     .template(t -> {
                         t.settings(osIndexSettings(settings));
                         if (settings.getTypeMapping() != null) {

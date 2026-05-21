@@ -90,14 +90,14 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 **Goal:** Event metadata is indexed in OpenSearch via the Phase 6 schema manager infrastructure with production-grade ILM (hot SSD NVMe → UltraWarm → delete), read/write alias routing, and bulk ingestion via BulkIngester.
 
-- [ ] `EventDocument` record in `apps/event-ingest` annotated `@OsIndex(indexPattern="events-*", templateName="events-template", writeAlias="events_write", readAlias="events_read")` — fields: `eventId`, `schemaType`, `timestamp`, `s3Key`, `batchOffset`, `batchLength`, `ruleResults` (list of `{ruleId, status}` objects)
-- [ ] Index template `events-template` — covers pattern `events-*`; `dynamic: false`, `date_detection: false`; explicit keyword/date/integer mappings for all fixed fields; initial index created with date math name `<events-{now/d}-000001>` (suffix increments on each rollover); template declares `events_write` and `events_read` aliases
-- [ ] ILM policy — hot tier (SSD NVMe): rollover at 130 GB or 12 hours; transition to UltraWarm after rollover; UltraWarm retention: 4 days, then auto-delete; no cold tier; policy attached to the template via `index.lifecycle.name`
-- [ ] S3 snapshots — use the default AWS-managed automated snapshot policy (hourly snapshots, 14-day retention on the AWS-managed bucket); 14-day retention comfortably outlasts the 4.5-day hot + warm lifecycle; no custom snapshot repository needed
-- [ ] Replica count configurable — `opensearch.index.replicas: 0` for single-node dev; `1` for prod minimum; applied via an `OsMigration` cluster settings step
-- [ ] `EventDocumentIndexer` in `apps/event-ingest` — calls `OsDocumentClient.save()` (BulkIngester-backed); async flush; Resilience4J circuit breaker; retry with backoff on transient failures
-- [ ] `@Timed(histogram=true)` on bulk index; `DistributionSummary` for documents per bulk request; `Counter` for index failures and circuit breaker opens
-- [ ] itest against OpenSearch in Docker Compose: index events, verify field mappings, verify ILM policy applied, verify write alias routes to the active index, verify read alias resolves correctly
+- [x] `EventDocument` record in `apps/event-ingest` annotated `@OsIndex(indexPattern="events-*", templateName="events-template", writeAlias="events_write", readAlias="events_read")` — fields: `eventId`, `schemaType`, `timestamp`, `s3Key`, `batchOffset`, `batchLength`, `ruleResults` (list of `{ruleId, status}` objects)
+- [x] Index template `events-template` — covers pattern `events-*`; `dynamic: false`, `date_detection: false`; explicit keyword/date/integer mappings for all fixed fields; initial index created with date math name `<events-{now/d}-000001>` (suffix increments on each rollover); template declares `events_write` and `events_read` aliases
+- [x] ILM policy — hot tier (SSD NVMe): rollover at 130 GB or 12 hours; transition to UltraWarm after rollover; UltraWarm retention: 4 days, then auto-delete; no cold tier; policy attached to the template via `index.lifecycle.name`
+- [x] S3 snapshots — use the default AWS-managed automated snapshot policy (hourly snapshots, 14-day retention on the AWS-managed bucket); 14-day retention comfortably outlasts the 4.5-day hot + warm lifecycle; no custom snapshot repository needed
+- [x] Replica count configurable — `opensearch.index.replicas: 0` for single-node dev; `1` for prod minimum; applied via an `OsMigration` cluster settings step
+- [x] `EventDocumentIndexer` in `apps/event-ingest` — calls `OsDocumentClient.save()` (BulkIngester-backed); async flush; Resilience4J circuit breaker; retry with backoff on transient failures
+- [x] `@Timed(histogram=true)` on bulk index; `DistributionSummary` for documents per bulk request; `Counter` for index failures and circuit breaker opens
+- [x] itest against OpenSearch in Docker Compose: index events, verify field mappings, verify ILM policy applied, verify write alias routes to the active index, verify read alias resolves correctly
 
 ---
 

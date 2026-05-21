@@ -142,5 +142,5 @@ event-ingest:
         - event-ingest-dlt-group
   consumer:
     # Override MY_POD_NAME and INGEST_POD_COUNT from Helm chart in production
-    pod-name: ${MY_POD_NAME:local-pod}
-    pod-count: ${INGEST_POD_COUNT:1}
+    pod-name: local-pod
+    pod-count: 1
