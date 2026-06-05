@@ -101,7 +101,97 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 8 — Rules Engine
+## Phase 8 — Metadata Search
+
+**Goal:** Events are queryable with a composable, type-safe boolean query language; results are paginated using OpenSearch `search_after` (no PIT). The query language and pagination model live in `libs/event-api`; all OpenSearch translation and aggregation concerns live in `apps/event-read`. Abstraction layers are kept strictly separate.
+
+### Search Query Language — `libs/event-api` (`search` package)
+
+- [ ] **`FieldType` enum** — `KEYWORD`, `INTEGER`, `DATE`, `TEXT`, `BOOLEAN`; represents the OpenSearch field type backing each searchable field
+
+- [ ] **`SearchField` enum** — one value per searchable event field; each value holds `fieldName: String` (the actual OpenSearch field name), `fieldType: FieldType`, and `allowedAggregation: AggregationType` (null when aggregation is not permitted on the field); values and their allowed aggregations:
+  - `EVENT_ID` — `FieldType.KEYWORD`, `allowedAggregation = null`
+  - `SCHEMA_TYPE` — `FieldType.KEYWORD`, `allowedAggregation = TERMS`
+  - `TIMESTAMP` — `FieldType.DATE`, `allowedAggregation = DATE_HISTOGRAM`
+  - `RULE_RESULT_STATUS` — `FieldType.KEYWORD`, `allowedAggregation = null`
+  - (`S3_KEY` is an internal storage field and is intentionally excluded from `SearchField`)
+
+- [ ] **`Expression` interface** — root marker interface for all query tree nodes
+
+- [ ] **`ConditionExpr implements Expression`** — leaf query node with static factory methods that each accept a `SearchField` plus typed value(s) and return a fully initialised `ConditionExpr`:
+  - `eq(SearchField, Object value)`
+  - `in(SearchField, Collection<?> values)`
+  - `between(SearchField, Object lower, Object upper)`
+  - `exists(SearchField)`
+  - `notExists(SearchField)`
+
+- [ ] **`BooleanExpr implements Expression`** — composite query node; holds `must: List<Expression>`, `should: List<Expression>`, `mustNot: List<Expression>`; builder or static factory methods for each clause list; any list may be empty
+
+- [ ] **`SortDirection` enum** — `ASC`, `DESC`
+
+- [ ] **`SearchPage`** — pagination descriptor; fields: `page: int` (`@Min(0)`, default `0`), `size: int` (`@Min(1)`, `@Max(1000)`, default `20`); when the client omits `SearchPage` from the request entirely the system defaults to page 0 / size 20
+
+- [ ] **`AggregationType` enum** — `TERMS`, `DATE_HISTOGRAM`, `VALUE_COUNT`
+
+- [ ] **`AggregationRequest`** — describes one aggregation to compute alongside the query; fields: `name: String` (`@NotBlank`), `type: AggregationType` (`@NotNull`), `field: SearchField` (`@NotNull`, must have a non-null `allowedAggregation`), `interval: String` (required only for `DATE_HISTOGRAM`, e.g. `"1h"`); validation rejects any `field` whose `allowedAggregation` is null
+
+- [ ] **`CursorPageable`** — encapsulates all cursor-based paging and sorting state; decouples the client from raw `search_after` mechanics; fields:
+  - `page: @Valid SearchPage` — pagination bounds (defaults applied if omitted)
+  - `sortField: @NotNull SearchField` — field to sort by; must be present for stable `search_after` ordering
+  - `sortDirection: @NotNull SortDirection` — `ASC` or `DESC`
+  - `searchAfter: List<Object>` — opaque cursor token produced by the previous `SearchResponse`; `null` on the first page; clients treat this as an opaque value and pass it back verbatim
+
+- [ ] **`SearchRequest`** — fully validated search descriptor annotated with `@Validated`; fields:
+  - `expression: Expression` — root query tree; `null` means match-all
+  - `cursorPageable: @NotNull @Valid CursorPageable` — paging, sort, and cursor; contains `SearchPage` (defaulted if omitted)
+  - `aggregations: @Valid List<AggregationRequest>` — empty list means no aggregations
+
+- [ ] **`AggregationBucket`** — single bucket in an aggregation result; fields: `key: Object`, `docCount: long`, `subAggregations: Map<String, AggregationResult>`
+
+- [ ] **`AggregationResult`** — output of one named aggregation; fields: `name: String`, `buckets: List<AggregationBucket>`
+
+- [ ] **`SearchResponse<T>`** — generic search result; fields: `hits: List<T>`, `totalHits: long`, `nextPage: CursorPageable` (null when no further pages — `searchAfter` inside is populated from the last hit's sort values; client passes this object back as `cursorPageable` in the next `SearchRequest`), `aggregations: Map<String, AggregationResult>`
+
+- [ ] Spring `@Validated` and Bean Validation constraints applied to all `SearchRequest` and nested objects; validation failures propagated to callers as `ConstraintViolationException`; `GlobalExceptionHandler` maps these to HTTP 400
+
+### OpenSearch ORM additions — `libs/opensearch-lib`
+
+- [ ] **`@FieldName` annotation** — `@Target(FIELD)`, `@Retention(RUNTIME)`; single attribute `value: String`; placed on fields inside `@OsIndex`-annotated document classes to declare the OpenSearch field name when it differs from the Java field name (e.g. `@FieldName("schema_type")` on a Java field named `schemaType`)
+
+- [ ] **`FieldNameMapper`** — reflection cache for ORM field resolution:
+  - Internal cache: `ConcurrentHashMap<Class<?>, Map<String, Field>>` — key is the OpenSearch field name (from `@FieldName.value` if present, otherwise the Java field name); value is the `java.lang.reflect.Field`
+  - Populated once per class on first access by scanning all declared fields
+  - Primary API: `getField(Class<?> docClass, String opensearchFieldName): Field` — returns the cached `Field` or throws `IllegalArgumentException` if the field is not found
+  - `getValue(Object document, String opensearchFieldName): Object` — convenience method; retrieves and returns the field value via reflection
+
+### Event-Read service — `apps/event-read`
+
+- [ ] **`OsDocumentClient.search()` implementation** — fills in the Phase 6 stub; accepts an already-translated OpenSearch Java Client `SearchRequest`; executes against the read alias; returns the raw `SearchResponse` from the OpenSearch client; all query building and result mapping is the caller's responsibility
+
+- [ ] **`SearchRequestTranslator`** — translates a `libs/event-api` `SearchRequest` into an OpenSearch Java Client `SearchRequest`:
+  - Recursively walks the `Expression` tree: `BooleanExpr` → OpenSearch `bool` query with `must` / `should` / `must_not` clauses; `ConditionExpr` → `term` (eq), `terms` (in), `range` (between), `exists` (exists), `bool.must_not[exists]` (notExists)
+  - Resolves `SearchField.fieldName` for all query leaf nodes
+  - Reads sort field, sort direction, and `searchAfter` cursor from `searchRequest.cursorPageable`; appends `search_after` array only when non-null (omitted on first page)
+  - Sets `sort` on `cursorPageable.sortField.fieldName` + `cursorPageable.sortDirection`; a secondary sort on `_id` guarantees stable ordering for `search_after`
+  - Translates `AggregationRequest` list into OpenSearch aggregation DSL (`terms`, `date_histogram`, `value_count`)
+
+- [ ] **`SearchResponseTranslator`** — translates raw OpenSearch `SearchResponse` → `SearchResponse<EventSearchResult>`:
+  - Maps each hit to `EventSearchResult` via `ObjectMapper`
+  - Extracts sort values from the last hit; if present, constructs a `CursorPageable` (copying `sortField`, `sortDirection`, and `SearchPage` from the request's `cursorPageable`, advancing `page` by 1, and setting `searchAfter` to the extracted sort values) → `nextPage`; `nextPage` is null when `hits` is empty
+  - Extracts `aggregations` map → `Map<String, AggregationResult>` with bucket key, doc count, and nested sub-aggregations
+  - Sets `totalHits` from `hits.total.value`
+
+- [ ] **`EventSearchResult`** — external-safe projection of `EventDocument`; exposes `eventId`, `schemaType`, `timestamp`, `s3Key`; omits internal byte offsets
+
+- [ ] **REST endpoint** — `POST /search/v1/events` in `apps/event-read`; accepts `@Validated @RequestBody SearchRequest`; returns `SearchResponse<EventSearchResult>`; POST is used because the query expression tree can be arbitrarily large; validation errors handled by `GlobalExceptionHandler` → HTTP 400
+
+- [ ] Unit tests — expression building, `SearchRequestTranslator` output (verify OpenSearch query DSL shape), `FieldNameMapper` cache correctness and `@FieldName` override behaviour
+
+- [ ] itest against OpenSearch in Docker Compose — index events via Phase 7 indexer; search with `eq`, `in`, `between`, `exists`, `notExists`, and nested `BooleanExpr` (AND / OR / NOT); verify `search_after` cursor advances correctly page-by-page; verify `TERMS` and `DATE_HISTOGRAM` aggregation buckets; verify `@FieldName`-annotated fields resolve correctly
+
+---
+
+## Phase 9 — Rules Engine
 
 **Goal:** Configurable validation rules are defined in PostgreSQL, cached in the ingest service, and evaluated in parallel against incoming events; rule results are indexed in OpenSearch per event.
 
@@ -116,7 +206,7 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 
 ---
 
-## Phase 9 — Ingest Benchmarking
+## Phase 10 — Ingest Benchmarking
 
 **Goal:** End-to-end throughput is baselined and the primary bottleneck on the path to 1M events/sec is identified and documented.
 
@@ -126,16 +216,6 @@ Phases are ordered by dependency. Each phase is a self-contained, shippable incr
 - [ ] Bottleneck identification — record which stage is the ceiling at each concurrency level
 - [ ] Document results in `specs/2026-05-13-storage-consumers/benchmark-results.md` — hardware spec, JVM version, settings used, events/sec achieved per stage
 - [ ] Target: establish baseline; remediate top bottleneck if below 100K events/sec; document path to 1M events/sec with horizontal scaling model
-
----
-
-## Phase 10 — Metadata Search
-
-**Goal:** Events are queryable with full boolean search returning paginated metadata.
-
-- [ ] OpenSearch query service — full boolean search (AND / NOT / OR), keyword, time-range, and schema-type filters; implements the search stub defined in Phase 6 `OsDocumentClient`
-- [ ] REST search endpoint (`GET /search/v1/events?q=...&type=...&from=...&to=...`) returning metadata documents
-- [ ] Pagination and cursor-based result streaming for large result sets
 
 ---
 
@@ -265,17 +345,18 @@ Phase 1 (Skeleton)
                  └─ Phase 5 (S3 Storage: S3Client abstraction, Autoconfiguration, Step Builders, ZSTD, Hive keys)
                  └─ Phase 6 (OpenSearch Schema Manager: OsAdminClient, OsDocumentClient, @OsIndex, OsSchemaManager) ← also needs Phase 3
                       └─ Phase 7 (OpenSearch Storage: EventDocument, ILM hot→UltraWarm, aliases, BulkIngester)
-                           └─ Phase 8 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)
-                                └─ Phase 9 (Ingest Benchmarking: end-to-end throughput baseline)
-                                     └─ Phase 10 (Metadata Search: boolean query, pagination)
-                                          └─ Phase 11 (Payload Retrieval & API Contract)
-                                               └─ Phase 12 (Frontend Event Explorer)
-                                               └─ Phase 13 (Live Feed) ← also needs Phase 3
-                                                    └─ Phase 14 (Dashboards)
-                                                         └─ Phase 15 (Alerting)
+                           └─ Phase 8 (Metadata Search: boolean query language, search_after pagination, aggregations, @FieldName ORM, event-read REST)
+                           └─ Phase 9 (Rules Engine: schema/rule CRUD, parallel eval, cache, OS rule results)
+                                └─ Phase 10 (Ingest Benchmarking: end-to-end throughput baseline)
+                      └─ Phase 8 also needs Phase 6 (OsDocumentClient.search() stub)
+Phase 8 └─ Phase 11 (Payload Retrieval & API Contract)
+              └─ Phase 12 (Frontend Event Explorer)
+              └─ Phase 13 (Live Feed) ← also needs Phase 3
+                   └─ Phase 14 (Dashboards)
+                        └─ Phase 15 (Alerting)
 Phase 16 (Auth) ← can start after Phase 1, applied across all phases
 Phase 17 (Collaboration) ← needs Phase 14 + Phase 16
-Phase 18 (Retention) ← needs Phase 5 + Phase 8
+Phase 18 (Retention) ← needs Phase 5 + Phase 9
 Phase 19 (Observability) ← can layer in at any phase
 Phase 20 (DR) ← after Phase 19
 ```
