@@ -364,7 +364,10 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
             }
         } else if (agg.isLterms()) {
             for (var bucket : agg.lterms().buckets().array()) {
-                buckets.add(new OsAggregationBucket(bucket.key(), bucket.docCount(), Map.of()));
+                // LongTermsBucketKey is a tagged union; extract the concrete value
+                var k = bucket.key();
+                Object keyValue = k.isSigned() ? k.signed() : k.unsigned();
+                buckets.add(new OsAggregationBucket(keyValue, bucket.docCount(), Map.of()));
             }
         } else if (agg.isDterms()) {
             for (var bucket : agg.dterms().buckets().array()) {

@@ -10,8 +10,8 @@ public record AggregationRequest(
         @NotNull SearchField field,
         String interval
 ) {
-    @AssertTrue(message = "field does not support aggregation")
+    @AssertTrue(message = "field does not support this aggregation type")
     public boolean isFieldAggregatable() {
-        return field == null || field.allowedAggregation() != null;
+        return field == null || field.allowedAggregation() == type;
     }
 }
