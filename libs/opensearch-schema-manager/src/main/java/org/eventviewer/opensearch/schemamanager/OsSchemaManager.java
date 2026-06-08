@@ -1,10 +1,16 @@
-package org.eventviewer.opensearch.autoconfigure;
+package org.eventviewer.opensearch.schemamanager;
 
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.eventviewer.leader.LeaderListener;
-import org.eventviewer.opensearch.*;
+import org.eventviewer.opensearch.ClusterSettings;
+import org.eventviewer.opensearch.IndexSettings;
+import org.eventviewer.opensearch.MigrationData;
+import org.eventviewer.opensearch.OsAdminClient;
+import org.eventviewer.opensearch.OsDocumentClient;
+import org.eventviewer.opensearch.OsException;
+import org.eventviewer.opensearch.OsMigration;
 import org.opensearch.client.opensearch._types.mapping.TypeMapping;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +49,7 @@ public class OsSchemaManager implements LeaderListener {
     @Override
     @Timed(value = "os.schema.manager.on.leader", histogram = true)
     public void onElected() {
-        if(!executed.compareAndSet(false, true)) {
+        if (!executed.compareAndSet(false, true)) {
             return;
         }
 
@@ -57,20 +63,21 @@ public class OsSchemaManager implements LeaderListener {
                 return;
             }
 
-            OsMigration latest = sorted.stream().findFirst().orElseThrow(() -> new RuntimeException("No Search Migration Found for Search Migration Manager"));
+            OsMigration latest = sorted.stream().findFirst()
+                    .orElseThrow(() -> new RuntimeException("No Search Migration Found"));
 
             log.info("Found Latest Search Migration {} For Version {}", latest.getClass().getSimpleName(), latest.version());
 
             ensureMigrationsIndex();
 
             boolean versionExists = versionExists(latest.version());
-            if(versionExists) {
+            if (versionExists) {
                 log.info("Latest migration version={} already applied; skipping.", latest.version());
                 migrationsSkipped.increment();
                 return;
             }
 
-            log.info("Applying migration version={} ", latest.version());
+            log.info("Applying migration version={}", latest.version());
             for (MigrationData data : latest.data()) {
 
                 if (data.getIndexSettings() != null) {
@@ -98,11 +105,10 @@ public class OsSchemaManager implements LeaderListener {
     @Timed(value = "os.schema.manager.ensure.migrations.index", histogram = true)
     protected void ensureMigrationsIndex() throws OsException {
         if (!adminClient.indexExists(MigrationDocument.class)) {
-            TypeMapping mappings =
-                    TypeMapping.builder()
-                            .properties("version", p -> p.keyword(builder -> builder.index(true).docValues(true)))
-                            .properties("timestamp", p -> p.date(d -> d.format("strict_date_time").index(true)))
-                            .build();
+            TypeMapping mappings = TypeMapping.builder()
+                    .properties("version", p -> p.keyword(b -> b.index(true).docValues(true)))
+                    .properties("timestamp", p -> p.date(d -> d.format("strict_date_time").index(true)))
+                    .build();
 
             IndexSettings settings = new IndexSettings();
             settings.setShards(1);
@@ -126,7 +132,6 @@ public class OsSchemaManager implements LeaderListener {
                 String.valueOf(migration.version()),
                 ZonedDateTime.now()
         );
-
         osDocumentClient.save(List.of(doc));
     }
 }

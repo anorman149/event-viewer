@@ -1,4 +1,4 @@
-package org.eventviewer.ingest.domain;
+package org.eventviewer.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +26,7 @@ class EventDocumentTest {
     @Test
     void nullRuleResults_normalizesToEmptyList() {
         EventDocument doc = new EventDocument(
-                "evt-1", 42, Instant.now(), "550e8400-e29b-41d4-a716-446655440000.zst", "local-pod", 0L, 100, null);
+                "evt-1", 42, Instant.now(), "550e8400.zst", "local-pod", 0L, 100, null);
         assertThat(doc.ruleResults()).isNotNull();
         assertThat(doc.ruleResults()).isEmpty();
     }
@@ -34,7 +34,7 @@ class EventDocumentTest {
     @Test
     void emptyRuleResults_absentFromJson() throws Exception {
         EventDocument doc = new EventDocument(
-                "evt-1", 42, Instant.now(), "550e8400-e29b-41d4-a716-446655440000.zst", "local-pod", 0L, 100, List.of());
+                "evt-1", 42, Instant.now(), "550e8400.zst", "local-pod", 0L, 100, List.of());
 
         JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(doc));
 
@@ -44,8 +44,8 @@ class EventDocumentTest {
     @Test
     void nonEmptyRuleResults_presentInJson() throws Exception {
         EventDocument doc = new EventDocument(
-                "evt-1", 42, Instant.now(), "550e8400-e29b-41d4-a716-446655440000.zst", "local-pod", 0L, 100,
-                List.of(new RuleResult("rule-abc", RuleStatus.SUCCESS)));
+                "evt-1", 42, Instant.now(), "550e8400.zst", "local-pod", 0L, 100,
+                List.of("rule-abc_1"));
 
         JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(doc));
 

@@ -1,12 +1,12 @@
 package org.eventviewer.ingest;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.eventviewer.ingest.domain.EventDocument;
+import org.eventviewer.model.EventDocument;
 import org.eventviewer.opensearch.OsAdminClient;
 import org.eventviewer.opensearch.OsDocumentClient;
 import org.eventviewer.opensearch.OsMigration;
-import org.eventviewer.opensearch.autoconfigure.MigrationDocument;
-import org.eventviewer.opensearch.autoconfigure.OsSchemaManager;
+import org.eventviewer.opensearch.schemamanager.MigrationDocument;
+import org.eventviewer.opensearch.schemamanager.OsSchemaManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 

@@ -1,7 +1,8 @@
-package org.eventviewer.ingest.domain;
+package org.eventviewer.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.eventviewer.opensearch.Alias;
+import org.eventviewer.opensearch.Id;
 import org.eventviewer.opensearch.OsIndex;
 import org.eventviewer.opensearch.Template;
 
@@ -14,14 +15,14 @@ import java.util.List;
         alias = @Alias(write = "events_write", read = "events_read")
 )
 public record EventDocument(
-        String eventId,
+        @Id String eventId,
         int schemaType,
         Instant timestamp,
         String s3FileName,
         String podId,
         long batchOffset,
         int batchLength,
-        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<RuleResult> ruleResults
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> ruleResults
 ) {
     public EventDocument {
         ruleResults = ruleResults != null ? ruleResults : List.of();

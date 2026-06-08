@@ -1,7 +1,13 @@
-package org.eventviewer.opensearch.autoconfigure;
+package org.eventviewer.opensearch.schemamanager;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import org.eventviewer.opensearch.*;
+import org.eventviewer.opensearch.ClusterSettings;
+import org.eventviewer.opensearch.IndexSettings;
+import org.eventviewer.opensearch.MigrationData;
+import org.eventviewer.opensearch.OsAdminClient;
+import org.eventviewer.opensearch.OsDocumentClient;
+import org.eventviewer.opensearch.OsException;
+import org.eventviewer.opensearch.OsMigration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

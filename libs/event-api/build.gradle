@@ -1,4 +1,6 @@
 dependencies {
     compileOnly 'jakarta.validation:jakarta.validation-api'
     compileOnly 'com.fasterxml.jackson.core:jackson-annotations'
+
+    testImplementation 'org.assertj:assertj-core'
 }
