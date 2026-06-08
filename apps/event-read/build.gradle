@@ -1,2 +1,29 @@
-// Stub — implemented in Phase 4.
-// The java plugin and Spring Boot BOM are applied by the root build.
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    implementation project(':libs:event-api')
+    implementation project(':libs:event-persistence-model')
+    implementation project(':libs:common')
+    implementation project(':libs:opensearch-lib')
+    implementation 'org.opensearch.client:opensearch-java:3.6.0'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.mockito:mockito-core'
+
+    itestImplementation 'io.jsonwebtoken:jjwt-api:0.12.6'
+    itestRuntimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
+    itestRuntimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
+}
+
+tasks.named('processItestResources') {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

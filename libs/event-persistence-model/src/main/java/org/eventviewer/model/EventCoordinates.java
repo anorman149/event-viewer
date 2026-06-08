@@ -1,4 +1,4 @@
-package org.eventviewer.ingest.domain;
+package org.eventviewer.model;
 
 import java.time.Instant;
 import java.util.UUID;

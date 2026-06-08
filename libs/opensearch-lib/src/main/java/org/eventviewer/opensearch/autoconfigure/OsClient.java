@@ -1,5 +1,7 @@
 package org.eventviewer.opensearch.autoconfigure;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
@@ -9,15 +11,23 @@ import org.opensearch.client.json.JsonData;
 import org.opensearch.client.opensearch.OpenSearchClient;
 import org.opensearch.client.opensearch._helpers.bulk.BulkIngester;
 import org.opensearch.client.opensearch._helpers.bulk.BulkListener;
+import org.opensearch.client.opensearch._types.FieldValue;
+import org.opensearch.client.opensearch._types.SortOptions;
+import org.opensearch.client.opensearch._types.aggregations.Aggregate;
 import org.opensearch.client.opensearch.core.BulkRequest;
 import org.opensearch.client.opensearch.core.BulkResponse;
+import org.opensearch.client.opensearch.core.SearchRequest;
+import org.opensearch.client.opensearch.core.SearchResponse;
+import org.opensearch.client.opensearch.core.search.Hit;
 import org.opensearch.client.opensearch.indices.ExistsIndexTemplateRequest;
 import org.opensearch.client.transport.BackoffPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -28,22 +38,37 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
 
     private final OpenSearchClient client;
     private final OsSchemaRegistry registry;
+    private final FieldNameMapper fieldNameMapper;
+    private final ObjectMapper objectMapper;
     private final DistributionSummary bulkDocuments;
     private final Counter bulkFlushFailures;
+    private final DistributionSummary searchHits;
+    private final Counter searchFailures;
     private final MeterRegistry meterRegistry;
 
     public OsClient(OpenSearchClient client,
                     OsSchemaRegistry registry,
-                    MeterRegistry meterRegistry) {
+                    MeterRegistry meterRegistry,
+                    FieldNameMapper fieldNameMapper,
+                    ObjectMapper objectMapper) {
         this.client = client;
         this.registry = registry;
         this.meterRegistry = meterRegistry;
+        this.fieldNameMapper = fieldNameMapper;
+        this.objectMapper = objectMapper;
         this.bulkDocuments = DistributionSummary.builder("os.bulk.documents")
                 .description("Documents per bulk save call")
                 .publishPercentileHistogram()
                 .register(meterRegistry);
         this.bulkFlushFailures = Counter.builder("os.bulk.flush.failures")
                 .description("Bulk save calls that completed with errors")
+                .register(meterRegistry);
+        this.searchHits = DistributionSummary.builder("opensearch.search.hits")
+                .description("Hits per search response")
+                .publishPercentileHistogram()
+                .register(meterRegistry);
+        this.searchFailures = Counter.builder("opensearch.search.failures")
+                .description("Search calls that failed")
                 .register(meterRegistry);
     }
 
@@ -233,10 +258,129 @@ public class OsClient implements OsAdminClient, OsDocumentClient {
     }
 
     @Override
-    @Timed(value = "os.document.client.search", histogram = true)
-    public <T> SearchResult<T> search(Search search, Class<T> entityClass) throws OsException {
-        registry.getMetadata(entityClass);
-        throw new UnsupportedOperationException("search() is implemented in Phase 10");
+    @Timed(value = "opensearch.document.client.search", histogram = true)
+    public <T> OsSearchResponse<T> search(Class<T> docClass, OsSearchRequest request) throws OsException {
+        OsIndexMetadata metadata = registry.getMetadata(docClass);
+        String readAlias = metadata.getReadAlias();
+
+        try {
+            SearchRequest.Builder reqBuilder = new SearchRequest.Builder()
+                    .index(readAlias)
+                    .query(request.query())
+                    .sort(request.sort())
+                    .size(request.size())
+                    .aggregations(request.aggregations());
+
+            if (request.searchAfter() != null && !request.searchAfter().isEmpty()) {
+                List<FieldValue> fieldValues = request.searchAfter().stream()
+                        .map(this::toFieldValue)
+                        .toList();
+                reqBuilder.searchAfter(fieldValues);
+            }
+
+            SearchResponse<ObjectNode> response = client.search(reqBuilder.build(), ObjectNode.class);
+
+            List<T> hits = new ArrayList<>();
+            List<Hit<ObjectNode>> rawHits = response.hits().hits();
+            for (Hit<ObjectNode> hit : rawHits) {
+                ObjectNode source = hit.source();
+                if (source != null) {
+                    ObjectNode processed = applyFieldNameMapping(source, docClass);
+                    hits.add(objectMapper.treeToValue(processed, docClass));
+                }
+            }
+
+            searchHits.record(hits.size());
+
+            OsCursorPageable nextPage = null;
+            if (!hits.isEmpty() && hits.size() >= request.size()) {
+                Hit<ObjectNode> lastHit = rawHits.getLast();
+                List<Object> searchAfterValues = extractSortValues(lastHit);
+                int nextPageNumber = request.pageNumber() + 1;
+                nextPage = new OsCursorPageable(request.sort(), request.size(), nextPageNumber, searchAfterValues);
+            }
+
+            long totalHits = response.hits().total() != null ? response.hits().total().value() : hits.size();
+
+            Map<String, OsAggregationResult> aggregations = mapAggregations(response.aggregations());
+
+            return new OsSearchResponse<>(hits, totalHits, nextPage, aggregations);
+
+        } catch (Exception e) {
+            searchFailures.increment();
+            throw new OsException("Search failed for " + docClass.getSimpleName(), e);
+        }
+    }
+
+    private <T> ObjectNode applyFieldNameMapping(ObjectNode source, Class<T> docClass) {
+        Map<String, String> mappings = fieldNameMapper.getMappings(docClass);
+        ObjectNode result = source.deepCopy();
+        for (Map.Entry<String, String> entry : mappings.entrySet()) {
+            String osName = entry.getKey();
+            String javaName = entry.getValue();
+            if (!osName.equals(javaName) && result.has(osName)) {
+                result.set(javaName, result.get(osName));
+                result.remove(osName);
+            }
+        }
+        return result;
+    }
+
+    private List<Object> extractSortValues(Hit<ObjectNode> hit) {
+        List<Object> values = new ArrayList<>();
+        for (FieldValue fv : hit.sort()) {
+            if (fv.isString()) values.add(fv._get());
+            else if (fv.isLong()) values.add(fv.longValue());
+            else if (fv.isDouble()) values.add(fv.doubleValue());
+            else if (fv.isBoolean()) values.add(fv.booleanValue());
+            else values.add(fv._get());
+        }
+        return values;
+    }
+
+    private FieldValue toFieldValue(Object val) {
+        if (val instanceof String s) return FieldValue.of(f -> f.stringValue(s));
+        if (val instanceof Long l) return FieldValue.of(f -> f.longValue(l));
+        if (val instanceof Integer i) return FieldValue.of(f -> f.longValue(i.longValue()));
+        if (val instanceof Double d) return FieldValue.of(f -> f.doubleValue(d));
+        if (val instanceof Boolean b) return FieldValue.of(f -> f.booleanValue(b));
+        return FieldValue.of(f -> f.stringValue(String.valueOf(val)));
+    }
+
+    private Map<String, OsAggregationResult> mapAggregations(Map<String, Aggregate> raw) {
+        if (raw == null || raw.isEmpty()) return Map.of();
+        Map<String, OsAggregationResult> result = new HashMap<>();
+        for (Map.Entry<String, Aggregate> entry : raw.entrySet()) {
+            result.put(entry.getKey(), mapAggregate(entry.getKey(), entry.getValue()));
+        }
+        return result;
+    }
+
+    private OsAggregationResult mapAggregate(String name, Aggregate agg) {
+        List<OsAggregationBucket> buckets = new ArrayList<>();
+        if (agg.isSterms()) {
+            for (var bucket : agg.sterms().buckets().array()) {
+                buckets.add(new OsAggregationBucket(bucket.key(), bucket.docCount(), Map.of()));
+            }
+        } else if (agg.isLterms()) {
+            for (var bucket : agg.lterms().buckets().array()) {
+                // LongTermsBucketKey is a tagged union; extract the concrete value
+                var k = bucket.key();
+                Object keyValue = k.isSigned() ? k.signed() : k.unsigned();
+                buckets.add(new OsAggregationBucket(keyValue, bucket.docCount(), Map.of()));
+            }
+        } else if (agg.isDterms()) {
+            for (var bucket : agg.dterms().buckets().array()) {
+                buckets.add(new OsAggregationBucket(bucket.key(), bucket.docCount(), Map.of()));
+            }
+        } else if (agg.isDateHistogram()) {
+            for (var bucket : agg.dateHistogram().buckets().array()) {
+                buckets.add(new OsAggregationBucket(bucket.key(), bucket.docCount(), Map.of()));
+            }
+        } else if (agg.isValueCount()) {
+            buckets.add(new OsAggregationBucket("_value", agg.valueCount().value().longValue(), Map.of()));
+        }
+        return new OsAggregationResult(name, buckets);
     }
 
     @Override

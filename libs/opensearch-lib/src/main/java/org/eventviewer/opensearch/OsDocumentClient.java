@@ -8,7 +8,7 @@ public interface OsDocumentClient {
 
     <T> T get(String id, Class<T> clazz) throws OsException;
 
-    <T> SearchResult<T> search(Search search, Class<T> entityClass) throws OsException;
+    <T> OsSearchResponse<T> search(Class<T> docClass, OsSearchRequest request) throws OsException;
 
     <T> void deleteByQuery(Search search, Class<T> entityClass) throws OsException;
 }

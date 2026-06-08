@@ -1,6 +1,6 @@
 package org.eventviewer.ingest.migration;
 
-import org.eventviewer.ingest.domain.EventDocument;
+import org.eventviewer.model.EventDocument;
 import org.eventviewer.opensearch.*;
 import org.opensearch.client.opensearch._types.mapping.DynamicMapping;
 import org.opensearch.client.opensearch._types.mapping.TypeMapping;

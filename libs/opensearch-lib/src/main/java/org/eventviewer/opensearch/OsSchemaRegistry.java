@@ -8,7 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class OsSchemaRegistry {
@@ -49,6 +51,10 @@ public class OsSchemaRegistry {
         }
 
         log.info("OsSchemaRegistry initialized with {} entries", registry.size());
+    }
+
+    public Set<Class<?>> getRegisteredClasses() {
+        return Collections.unmodifiableSet(registry.keySet());
     }
 
     @Timed(value = "os.schema.registry.get.metadata", histogram = true)

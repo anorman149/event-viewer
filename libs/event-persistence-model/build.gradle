@@ -1,0 +1,15 @@
+// ClassGraph (used in opensearch-lib's OsSchemaRegistry) can't process Java 25 bytecode.
+// EventDocument carries @OsIndex, so it must be compiled to Java 21 bytecode for scanning.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-source', '21', '-target', '21']
+}
+
+dependencies {
+    compileOnly project(':libs:opensearch-lib')
+    compileOnly 'com.fasterxml.jackson.core:jackson-annotations'
+
+    testImplementation project(':libs:opensearch-lib')
+    testImplementation 'org.assertj:assertj-core'
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind'
+    testImplementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+}

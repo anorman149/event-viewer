@@ -1,4 +1,4 @@
-package org.eventviewer.opensearch.autoconfigure;
+package org.eventviewer.opensearch.schemamanager;
 
 import org.eventviewer.opensearch.Alias;
 import org.eventviewer.opensearch.Id;
@@ -27,11 +27,6 @@ public class MigrationDocument {
     public String getVersion() { return version; }
     public void setVersion(String version) { this.version = version; }
 
-    public ZonedDateTime getTimestamp() {
-        return timestamp;
-    }
-
-    public void setTimestamp(ZonedDateTime timestamp) {
-        this.timestamp = timestamp;
-    }
+    public ZonedDateTime getTimestamp() { return timestamp; }
+    public void setTimestamp(ZonedDateTime timestamp) { this.timestamp = timestamp; }
 }

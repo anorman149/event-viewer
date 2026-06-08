@@ -4,10 +4,12 @@ plugins {
 
 dependencies {
     implementation project(':libs:event-api')
+    implementation project(':libs:event-persistence-model')
     implementation project(':libs:common')
     implementation project(':libs:leader')
     implementation project(':libs:s3-lib')
     implementation project(':libs:opensearch-lib')
+    implementation project(':libs:opensearch-schema-manager')
     implementation 'org.opensearch.client:opensearch-java:3.6.0'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'

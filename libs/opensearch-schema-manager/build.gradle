@@ -1,0 +1,15 @@
+// MigrationDocument carries @OsIndex and must be visible to ClassGraph at Java 21 bytecode.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-source', '21', '-target', '21']
+}
+
+dependencies {
+    implementation project(':libs:opensearch-lib')
+    implementation project(':libs:leader')
+    implementation 'org.opensearch.client:opensearch-java:3.6.0'
+    implementation 'org.springframework.boot:spring-boot-autoconfigure'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'org.slf4j:slf4j-api'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}

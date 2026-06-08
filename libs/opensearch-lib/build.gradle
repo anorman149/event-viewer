@@ -15,7 +15,6 @@ dependencies {
     implementation 'org.springframework:spring-context'
     implementation 'io.micrometer:micrometer-core'
     implementation 'org.slf4j:slf4j-api'
-    implementation project(':libs:leader')
     implementation project(':libs:common')
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
